@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nezha-stand"
+version = "0.1.0"
+description = "Standalone Isaac Gym training project for Nezha standing"
+requires-python = ">=3.8,<3.9"
+dependencies = [
+    "matplotlib>=3.3,<3.8",
+    "numpy>=1.20,<1.24",
+    "scipy>=1.6,<1.11",
+    "tensorboard>=2.8,<2.15",
+]
+
+[tool.setuptools.packages.find]
+include = ["nezha_stand*", "legged_gym*", "rsl_rl*"]
