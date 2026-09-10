@@ -154,6 +154,11 @@ class TaskRegistry():
             runner = OnPolicyRunner(env, train_cfg_dict, log_dir, device=args.rl_device)
         elif runner_name == 'HIMOnPolicyRunner':
             runner = HIMOnPolicyRunner(env, train_cfg_dict, log_dir, device=args.rl_device)
+        elif runner_name == 'DreamWaQStandRunner':
+            from nezha_stand.runner import DreamWaQStandRunner
+            runner = DreamWaQStandRunner(
+                env, train_cfg_dict, log_dir, device=args.rl_device
+            )
         else:
             raise ValueError(f"Unsupported runner class: {runner_name}")
         #save resume path before creating a new log_dir

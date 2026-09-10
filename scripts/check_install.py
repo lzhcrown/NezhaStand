@@ -52,6 +52,8 @@ def main():
         from legged_gym.utils import task_registry  # noqa: F401
         from rsl_rl.algorithms import PPO  # noqa: F401
         from rsl_rl.modules import ActorCritic  # noqa: F401
+        from rsl_rl.algorithms import DreamWaQPPO  # noqa: F401
+        from rsl_rl.modules import DreamWaQActorCritic  # noqa: F401
         from rsl_rl.runners.on_policy_runner import OnPolicyRunner  # noqa: F401
         from nezha_stand import register_task
         register_task()

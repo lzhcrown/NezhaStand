@@ -33,4 +33,6 @@ from .actor_critic_recurrent import ActorCriticRecurrent
 from .him_actor_critic import HIMActorCritic
 from .him_estimator import HIMEstimator
 from .mine_actor_critic import MINEActorCritic, MINEPolicyExporter
+from .dreamwaq_actor_critic import DreamWaQActorCritic
+from .dreamwaq_estimator import DreamWaQEstimator
 from .mine_estimator import MINEEstimator

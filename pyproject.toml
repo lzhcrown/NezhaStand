@@ -10,9 +10,16 @@ requires-python = ">=3.8,<3.9"
 dependencies = [
     "matplotlib>=3.3,<3.8",
     "numpy>=1.20,<1.24",
+    "PyYAML>=5.4,<7",
     "scipy>=1.6,<1.11",
-    "tensorboard>=2.8,<2.15",
+    # TensorBoard 2.14 dropped Python 3.8 support.
+    "tensorboard>=2.8,<2.14",
 ]
 
+[project.optional-dependencies]
+# 3.2.0 provides Linux CPython 3.8 wheels and is compatible with the Isaac Gym
+# Python environment used by this repository.
+mujoco = ["mujoco==3.2.0"]
+
 [tool.setuptools.packages.find]
-include = ["nezha_stand*", "legged_gym*", "rsl_rl*"]
+include = ["nezha_stand*", "legged_gym*", "rsl_rl*", "deploy*"]

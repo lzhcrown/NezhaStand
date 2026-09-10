@@ -13,7 +13,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from legged_gym.utils import get_args, task_registry
 from legged_gym.utils.helpers import class_to_dict, get_load_path
 from nezha_stand import TASK_NAME, register_task
-from nezha_stand.runner import StandRunner
+from nezha_stand.runner import DreamWaQStandRunner
 
 
 def evaluate(args):
@@ -23,23 +23,28 @@ def evaluate(args):
     env_cfg.env.num_envs = args.num_envs or 256
     env_cfg.noise.add_noise = False
     env, _ = task_registry.make_env(TASK_NAME, args=args, env_cfg=env_cfg)
-    runner = StandRunner(env, class_to_dict(train_cfg), None, args.rl_device)
+    runner = DreamWaQStandRunner(env, class_to_dict(train_cfg), None, args.rl_device)
     checkpoint = args.checkpoint_path
     if checkpoint is None:
         checkpoint = get_load_path(str(PROJECT_ROOT / 'logs'), -1, -1)
     runner.load(checkpoint, load_optimizer=False)
     policy = runner.get_inference_policy(device=env.device)
     obs = env.get_observations()
+    history = runner.initial_history()
     sums = torch.zeros(6, device=env.device)  # roll2, pitch2, height2, speed2, saturation, support
     samples = completed = successes = 0
     max_drift = 0.0
     wheel_square_sum = 0.0
     torque_pair_square_sum = 0.0
+    foot_load_fraction_square_sum = 0.0
+    contact_foot_speed_square_sum = 0.0
     target_episodes = args.episodes
     settle = env_cfg.evaluation.settling_time_s
     while completed < target_episodes:
         with torch.inference_mode():
-            obs, _, _, dones, infos, _, _ = env.step(policy(obs))
+            old_obs = obs
+            obs, _, _, dones, infos, _, _ = env.step(policy(obs, history))
+            history = runner.update_history(history, old_obs, dones)
         m = infos['stand_metrics']
         valid = m[:, 8] >= settle
         if valid.any():
@@ -49,6 +54,8 @@ def evaluate(args):
                                  v[:, 4].sum(), v[:, 5].sum()))
             wheel_square_sum += v[:, 7].square().sum().item()
             torque_pair_square_sum += v[:, 9].square().sum().item()
+            foot_load_fraction_square_sum += v[:, 10].square().sum().item()
+            contact_foot_speed_square_sum += v[:, 11].square().sum().item()
             max_drift = max(max_drift, v[:, 6].max().item())
             samples += int(valid.sum())
         done = dones.bool()
@@ -64,6 +71,8 @@ def evaluate(args):
         'max_xy_drift_m': max_drift,
         'wheel_rms_rad_s': math.sqrt(wheel_square_sum / max(samples, 1)),
         'torque_pair_rms_nm': math.sqrt(torque_pair_square_sum / max(samples, 1)),
+        'foot_load_fraction_rms': math.sqrt(foot_load_fraction_square_sum / max(samples, 1)),
+        'contact_foot_speed_rms_m_s': math.sqrt(contact_foot_speed_square_sum / max(samples, 1)),
     }
     limits = env_cfg.evaluation
     passed = {
@@ -76,6 +85,8 @@ def evaluate(args):
         'max_xy_drift_m': values['max_xy_drift_m'] <= limits.max_xy_drift_m,
         'wheel_rms_rad_s': values['wheel_rms_rad_s'] <= limits.max_wheel_rms_rad_s,
         'torque_pair_rms_nm': values['torque_pair_rms_nm'] <= limits.max_torque_pair_rms_nm,
+        'foot_load_fraction_rms': values['foot_load_fraction_rms'] <= limits.max_foot_load_fraction_rms,
+        'contact_foot_speed_rms_m_s': values['contact_foot_speed_rms_m_s'] <= limits.max_contact_foot_speed_rms_m_s,
     }
     for name, value in values.items():
         print(f'{name:28s} {value:10.5f}  {"PASS" if passed[name] else "FAIL"}')

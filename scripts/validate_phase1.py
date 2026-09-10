@@ -32,14 +32,35 @@ class Contracts(unittest.TestCase):
     def test_dimensions_and_method(self):
         cfg, ppo = cfgmod.NezhaStandCfg(), cfgmod.NezhaStandCfgPPO()
         self.assertEqual((cfg.env.num_observations, cfg.env.num_privileged_obs, cfg.env.num_actions), (46, 64, 12))
-        self.assertEqual((ppo.runner.policy_class_name, ppo.runner.algorithm_class_name), ('ActorCritic', 'PPO'))
-        self.assertEqual(ppo.runner_class_name, 'StandRunner')
+        self.assertEqual(cfg.env.observation_history_length, 5)
+        self.assertEqual(cfg.env.num_observation_history, 230)
+        self.assertEqual(
+            (ppo.runner.policy_class_name, ppo.runner.algorithm_class_name),
+            ('DreamWaQActorCritic', 'DreamWaQPPO'),
+        )
+        self.assertEqual(ppo.runner_class_name, 'DreamWaQStandRunner')
+        self.assertEqual(ppo.policy.latent_dim, 16)
+        self.assertEqual(ppo.policy.actor_hidden_dims, [512, 256, 128])
+        self.assertEqual(ppo.policy.critic_hidden_dims, [512, 256, 128])
+        self.assertEqual(ppo.policy.encoder_hidden_dims, [128])
+        self.assertEqual(ppo.policy.decoder_hidden_dims, [64, 128])
+        self.assertEqual(ppo.policy.velocity_target_start, 46)
+        self.assertEqual(ppo.runner.num_steps_per_env, 48)
+        self.assertEqual(ppo.algorithm.vae_learning_rate, 1e-3)
+        self.assertEqual(ppo.algorithm.kl_weight, 0.1)
         self.assertFalse(ppo.runner.resume)
         self.assertEqual((ppo.runner.load_run, ppo.runner.checkpoint), (-1, -1))
         self.assertGreater(cfg.rewards.scales.height, 0.0)
-        self.assertEqual(cfg.rewards.scales.torque_balance, -2.0)
-        self.assertFalse(hasattr(cfg.rewards.scales, 'pose'))
+        self.assertEqual(cfg.rewards.scales.torque_balance, -4.0)
+        self.assertGreater(cfg.rewards.scales.support, 0.0)
+        self.assertLess(cfg.rewards.scales.foot_force_balance, 0.0)
+        self.assertLess(cfg.rewards.scales.foot_slip, 0.0)
+        for forbidden in ('pose', 'default_pos', 'default_pos_reward',
+                          'feet_air_time', 'feet_clearance', 'feet_on_air'):
+            self.assertFalse(hasattr(cfg.rewards.scales, forbidden), forbidden)
         self.assertEqual(cfg.evaluation.max_torque_pair_rms_nm, 10.0)
+        self.assertEqual(cfg.evaluation.max_foot_load_fraction_rms, 0.10)
+        self.assertEqual(cfg.evaluation.max_contact_foot_speed_rms_m_s, 0.05)
 
     def test_runtime_default_dof_positions(self):
         cfg = cfgmod.NezhaStandCfg()
@@ -57,7 +78,34 @@ class Contracts(unittest.TestCase):
         methods = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
         self.assertIn('_reward_torque_balance', methods)
         self.assertIn('_torque_pair_rms_nm', methods)
+        self.assertIn('_reward_support', methods)
+        self.assertIn('_reward_foot_force_balance', methods)
+        self.assertIn('_reward_foot_slip', methods)
         self.assertNotIn('_reward_pose', methods)
+
+    def test_exactly_four_support_feet(self):
+        cfg = cfgmod.NezhaStandCfg()
+        self.assertEqual(cfg.asset.feet_names,
+                         ['FL_foot', 'FR_foot', 'RL_foot', 'RR_foot'])
+
+    def test_adopted_standing_gains(self):
+        cfg = cfgmod.NezhaStandCfg()
+        self.assertEqual(cfg.control.stiffness,
+                         {'hip_joint': 150.0, 'thigh_joint': 220.0,
+                          'calf_joint': 220.0, 'foot_joint': 0.0})
+        self.assertEqual(cfg.control.damping,
+                         {'hip_joint': 4.0, 'thigh_joint': 4.0,
+                          'calf_joint': 4.0, 'foot_joint': 1.2})
+
+    def test_mujoco_contact_observability_is_bundled(self):
+        simulator = ROOT / 'mujoco/nezha_stand_sim.py'
+        tree = ast.parse(simulator.read_text())
+        functions = {node.name for node in ast.walk(tree)
+                     if isinstance(node, ast.FunctionDef)}
+        self.assertIn('_wheel_vertical_forces', functions)
+        self.assertIn('_contact_metrics', functions)
+        self.assertIn('_csv_row', functions)
+        self.assertTrue((ROOT / 'scripts/plot_mujoco_contacts.py').is_file())
 
     def test_urdf_joint_partition(self):
         urdf = ET.parse(cfgmod.ASSET_FILE).getroot()
@@ -80,9 +128,17 @@ class Contracts(unittest.TestCase):
             'rsl_rl/algorithms/ppo.py',
             'rsl_rl/storage/rollout_storage.py',
             'rsl_rl/runners/on_policy_runner.py',
+            'rsl_rl/modules/dreamwaq_estimator.py',
+            'rsl_rl/modules/dreamwaq_actor_critic.py',
+            'rsl_rl/algorithms/dreamwaq_ppo.py',
+            'rsl_rl/storage/dreamwaq_rollout_storage.py',
+            'nezha_stand/runner.py',
+            'scripts/check_dreamwaq.py',
         )
         for relative in required:
             self.assertTrue((ROOT / relative).is_file(), relative)
+        registry_source = (ROOT / 'legged_gym/utils/task_registry.py').read_text()
+        self.assertIn("runner_name == 'DreamWaQStandRunner'", registry_source)
 
     def test_runtime_has_no_lzhmine_path_dependency(self):
         runtime_files = list((ROOT / 'nezha_stand').glob('*.py'))

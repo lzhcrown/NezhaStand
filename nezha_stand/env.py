@@ -115,6 +115,12 @@ class NezhaStandEnv(LeggedRobot):
     def compute_termination_observations(self, env_ids):
         # Evaluator consumes pre-reset states, so failed episodes are not hidden.
         g = self.projected_gravity
+        foot_contact = (self.contact_forces[:, self.feet_indices, 2]
+                        > self.cfg.rewards.contact_threshold).float()
+        foot_load_error_rms = (self._normalized_foot_loads() - 0.25).square().mean(1).sqrt()
+        contact_foot_speed_rms = (
+            (self.feet_vel[:, :, :2].square().sum(2) * foot_contact).sum(1)
+            / foot_contact.sum(1).clamp_min(1.0)).sqrt()
         metrics = torch.stack((
             torch.atan2(-g[:, 1], -g[:, 2]),
             torch.asin(g[:, 0].clamp(-1, 1)),
@@ -125,7 +131,9 @@ class NezhaStandEnv(LeggedRobot):
             (self.root_states[:, :2] - self.start_xy).norm(dim=1),
             self.dof_vel[:, self.wheel_indices].square().mean(1).sqrt(),
             self.episode_length_buf.float() * self.dt,
-            self._torque_pair_rms_nm()), dim=1)
+            self._torque_pair_rms_nm(),
+            foot_load_error_rms,
+            contact_foot_speed_rms), dim=1)
         self.extras['stand_metrics'] = metrics.clone()
         self.extras['time_outs'] = self.time_out_buf.clone()
         return self._observations(False)[1][env_ids].clone()
@@ -184,7 +192,23 @@ class NezhaStandEnv(LeggedRobot):
         return torch.exp(-self.base_lin_vel.square().sum(1) / 0.04 - self.base_ang_vel.square().sum(1) / 0.25)
 
     def _reward_support(self):
+        """Reward only when all four wheels carry a non-trivial vertical load."""
         return (self.contact_forces[:, self.feet_indices, 2] > self.cfg.rewards.contact_threshold).all(1).float()
+
+    def _normalized_foot_loads(self):
+        """Vertical wheel loads as fractions of the total supported load."""
+        vertical_load = self.contact_forces[:, self.feet_indices, 2].clamp_min(0.0)
+        return vertical_load / vertical_load.sum(1, keepdim=True).clamp_min(1e-6)
+
+    def _reward_foot_force_balance(self):
+        """Penalize unequal vertical loading while remaining independent of mass."""
+        return (self._normalized_foot_loads() - 0.25).square().sum(1)
+
+    def _reward_foot_slip(self):
+        """Penalize planar motion of wheel centres that are in ground contact."""
+        contact = (self.contact_forces[:, self.feet_indices, 2]
+                   > self.cfg.rewards.contact_threshold).float()
+        return (self.feet_vel[:, :, :2].square().sum(2) * contact).sum(1)
 
     def _leg_torque_pair_differences(self, normalize):
         """Six leg-pair differences for hip/thigh/calf torque magnitudes."""
@@ -198,8 +222,9 @@ class NezhaStandEnv(LeggedRobot):
             torque[:, 1] - torque[:, 3], torque[:, 2] - torque[:, 3]), dim=1)
 
     def _reward_torque_balance(self):
-        # Average the squared difference over six leg pairs, while summing the
-        # three joint-type errors so each hip/thigh/calf family is represented.
+        # Average the squared difference over all six leg pairs.  Corresponding
+        # hip/thigh/calf joints are compared by normalized magnitude, so mirror
+        # signs and different actuator limits do not create false imbalance.
         return self._leg_torque_pair_differences(normalize=True).square().sum(2).mean(1)
 
     def _torque_pair_rms_nm(self):

@@ -31,3 +31,4 @@
 from .ppo import PPO
 from .him_ppo import HIMPPO
 from .mine_ppo import MINEPPO
+from .dreamwaq_ppo import DreamWaQPPO

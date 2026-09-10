@@ -1,0 +1,81 @@
+# MuJoCo sim-to-sim configuration for the DreamWaQ standing policy.
+model_path: "mujoco/models/nezha_scene.xml"
+policy_path: "logs/exported/latest/policy.pt"
+history_length: 5
+
+# Isaac Gym used dt=0.005 and decimation=4.
+control_frequency_hz: 50
+initial_base_position: [0.0, 0.0, 0.54]
+# The standing policy must take control immediately, as it does in training.
+# A zero-action pre-settle lets this high-COM robot sag before feedback starts.
+settle_time_s: 0.0
+log_interval: 100
+# Matches nezha_stand/config.py; increase both together if the definition of
+# "load-bearing contact" is tightened later.
+contact_force_threshold_n: 5.0
+
+# Bodies/geometries used for MuJoCo contact-force diagnostics.
+wheel_body_names: [FL_foot, FR_foot, RL_foot, RR_foot]
+ground_geom_names: [floor]
+
+observation_scales:
+  ang_vel: 1.0
+  dof_pos: 1.0
+  dof_vel: 0.05
+
+# Physical DOF order must match Isaac Gym and the URDF.
+joint_names:
+  - FL_hip_joint
+  - FL_thigh_joint
+  - FL_calf_joint
+  - FL_foot_joint
+  - FR_hip_joint
+  - FR_thigh_joint
+  - FR_calf_joint
+  - FR_foot_joint
+  - RL_hip_joint
+  - RL_thigh_joint
+  - RL_calf_joint
+  - RL_foot_joint
+  - RR_hip_joint
+  - RR_thigh_joint
+  - RR_calf_joint
+  - RR_foot_joint
+
+leg_joint_indices: [0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14]
+wheel_joint_indices: [3, 7, 11, 15]
+
+# These values mirror nezha_stand/config.py exactly.
+default_dof_pos:
+  [0.10, 0.925, -1.85, 0.0,
+   -0.10, 0.925, -1.85, 0.0,
+   0.10, 0.925, -1.85, 0.0,
+   -0.10, 0.925, -1.85, 0.0]
+p_gains:
+  # Adopted standing gains: hip=150, thigh=220, calf=220 N*m/rad.
+  [150.0, 220.0, 220.0, 0.0,
+   150.0, 220.0, 220.0, 0.0,
+   150.0, 220.0, 220.0, 0.0,
+   150.0, 220.0, 220.0, 0.0]
+d_gains:
+  [4.0, 4.0, 4.0, 1.2,
+   4.0, 4.0, 4.0, 1.2,
+   4.0, 4.0, 4.0, 1.2,
+   4.0, 4.0, 4.0, 1.2]
+torque_limits:
+  [150.0, 150.0, 225.0, 56.0,
+   150.0, 150.0, 225.0, 56.0,
+   150.0, 150.0, 225.0, 56.0,
+   150.0, 150.0, 225.0, 56.0]
+dof_lower_limits:
+  [-0.6, -0.3, -2.5, -9999.0,
+   -0.6, -0.3, -2.5, -9999.0,
+   -0.6, -0.3, -2.5, -9999.0,
+   -0.6, -0.3, -2.5, -9999.0]
+dof_upper_limits:
+  [0.6, 2.6, -0.7, 9999.0,
+   0.6, 2.6, -0.7, 9999.0,
+   0.6, 2.6, -0.7, 9999.0,
+   0.6, 2.6, -0.7, 9999.0]
+action_scale: 0.15
+clip_actions: 3.0

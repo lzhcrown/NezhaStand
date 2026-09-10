@@ -1,4 +1,4 @@
-"""Phase 1 standalone asymmetric PPO configuration for Nezha."""
+"""DreamWaQ asymmetric training configuration for Nezha standing."""
 from pathlib import Path
 from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgPPO
 
@@ -16,6 +16,8 @@ class NezhaStandCfg(LeggedRobotCfg):
         # omega 3 + gravity 3 + leg q error 12 + leg dq 12 + wheel dq 4 + action 12
         num_one_step_observations = 46
         num_observations = 46
+        observation_history_length = 5
+        num_observation_history = num_observations * observation_history_length
         # clean actor 46 + true body velocity 3 + height error 1 + foot forces 12 + drift 2
         num_one_step_privileged_obs = 64
         num_privileged_obs = 64
@@ -96,15 +98,27 @@ class NezhaStandCfg(LeggedRobotCfg):
         contact_threshold = 5.0
         termination_cost = -5.0  # one-off penalty, not a rate multiplied by dt
         class scales:
-            upright = 2.0
-            height = 1.5
+            # Primary four-wheel-on-ground standing objectives.  There is
+            # deliberately no default/nominal joint-position reward: the
+            # default angles are only the reset pose and PD action origin.
+            upright = 3.0
+            height = 3.0
             stationary = 1.0
-            support = 1.0
+            support = 2.0
+
             # Mean squared difference of normalized |torque| between the six
             # leg pairs, compared only between corresponding joint types.
-            torque_balance = -2.0
+            torque_balance = -4.0
+
+            # Wheel-legged standing terms.  Normalized vertical-load balance
+            # prevents a wheel from merely touching with negligible load;
+            # foot_slip penalizes translation of a contacting wheel centre.
+            foot_force_balance = -0.5
+            foot_slip = -0.2
             wheel_speed = -0.05
             drift = -2.0
+
+            # Generic stability, smoothness and hardware-safety regularizers.
             lin_vel_z = -2.0
             ang_vel_xy = -0.2
             collision = -1.0
@@ -132,6 +146,8 @@ class NezhaStandCfg(LeggedRobotCfg):
         max_xy_drift_m = 0.10
         max_wheel_rms_rad_s = 0.20
         max_torque_pair_rms_nm = 10.0
+        max_foot_load_fraction_rms = 0.10
+        max_contact_foot_speed_rms_m_s = 0.05
 
     class normalization(LeggedRobotCfg.normalization):
         clip_actions = 3.0  # +/-0.45 rad residual, additionally clamped to limits
@@ -152,21 +168,31 @@ class NezhaStandCfg(LeggedRobotCfg):
 
 class NezhaStandCfgPPO(LeggedRobotCfgPPO):
     seed = 42
-    runner_class_name = 'StandRunner'
+    runner_class_name = 'DreamWaQStandRunner'
     class policy:
         init_noise_std = 0.5
-        actor_hidden_dims = [256, 128, 64]
-        critic_hidden_dims = [256, 128, 64]
+        history_length = 5
+        latent_dim = 16
+        actor_hidden_dims = [512, 256, 128]
+        critic_hidden_dims = [512, 256, 128]
+        encoder_hidden_dims = [128]
+        decoder_hidden_dims = [64, 128]
         activation = 'elu'
+        vae_sigma_min = 0.0
+        vae_sigma_max = 5.0
+        # Actor observations occupy [0:46]; true body velocity follows in critic obs.
+        velocity_target_start = 46
     class algorithm(LeggedRobotCfgPPO.algorithm):
-        learning_rate = 3e-4
-        entropy_coef = 0.003
-        schedule = 'fixed'
+        learning_rate = 1e-3
+        vae_learning_rate = 1e-3
+        kl_weight = 0.1
+        entropy_coef = 0.005
+        schedule = 'adaptive'
     class runner(LeggedRobotCfgPPO.runner):
-        policy_class_name = 'ActorCritic'
-        algorithm_class_name = 'PPO'
-        num_steps_per_env = 24
-        max_iterations = 5000
+        policy_class_name = 'DreamWaQActorCritic'
+        algorithm_class_name = 'DreamWaQPPO'
+        num_steps_per_env = 48
+        max_iterations = 20000
         save_interval = 100
         experiment_name = 'nezha_stand'
-        run_name = 'phase1_ppo'
+        run_name = 'dreamwaq_stand'
