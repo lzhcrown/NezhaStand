@@ -22,10 +22,21 @@ def _resolve(path):
 
 
 def validate(args):
+    if sys.version_info[:2] != (3, 11):
+        raise RuntimeError(
+            "MuJoCo sim-to-sim uses its own Python 3.11 environment; "
+            f"current Python is {sys.version.split()[0]}"
+        )
     try:
         import mujoco
     except ImportError as exc:
-        raise RuntimeError("Install mujoco==3.2.0 first") from exc
+        raise RuntimeError(
+            "Activate .venv-mujoco and install mujoco/requirements.txt"
+        ) from exc
+    if mujoco.__version__ != "3.12.0":
+        raise RuntimeError(
+            f"Expected MuJoCo 3.12.0 (LZHMine-aligned), got {mujoco.__version__}"
+        )
 
     with open(args.config, "r", encoding="utf-8") as stream:
         cfg = yaml.safe_load(stream)
@@ -103,6 +114,8 @@ def validate(args):
     else:
         print(f"policy: SKIP (not found: {policy_path})")
 
+    print(f"Python: {sys.version.split()[0]}")
+    print(f"MuJoCo: {mujoco.__version__}")
     print(f"model:  OK ({model_path})")
     print(f"state:  nq={model.nq}, nv={model.nv}, joints=16 + floating base")
     print("contract: current_obs=46, history=5x46=230, action=12, control=50 Hz")

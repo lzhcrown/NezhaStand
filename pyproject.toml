@@ -17,10 +17,5 @@ dependencies = [
     "tensorboard>=2.8,<2.14",
 ]
 
-[project.optional-dependencies]
-# 3.2.0 provides Linux CPython 3.8 wheels and is compatible with the Isaac Gym
-# Python environment used by this repository.
-mujoco = ["mujoco==3.2.0"]
-
 [tool.setuptools.packages.find]
 include = ["nezha_stand*", "legged_gym*", "rsl_rl*", "deploy*"]

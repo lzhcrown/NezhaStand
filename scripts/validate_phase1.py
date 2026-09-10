@@ -107,6 +107,15 @@ class Contracts(unittest.TestCase):
         self.assertIn('_csv_row', functions)
         self.assertTrue((ROOT / 'scripts/plot_mujoco_contacts.py').is_file())
 
+    def test_mujoco_uses_separate_lzhmine_aligned_environment(self):
+        requirements = (ROOT / 'mujoco/requirements.txt').read_text()
+        self.assertIn('mujoco==3.12.0', requirements)
+        validator = (ROOT / 'scripts/validate_mujoco.py').read_text()
+        self.assertIn('sys.version_info[:2] != (3, 11)', validator)
+        self.assertIn('mujoco.__version__ != "3.12.0"', validator)
+        gitignore = (ROOT / '.gitignore').read_text()
+        self.assertIn('.venv-mujoco/', gitignore)
+
     def test_urdf_joint_partition(self):
         urdf = ET.parse(cfgmod.ASSET_FILE).getroot()
         dofs = {j.get('name') for j in urdf.findall('joint') if j.get('type') != 'fixed'}

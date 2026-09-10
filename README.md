@@ -5,7 +5,8 @@
 Actor-Critic、VAE 历史估计器、PPO、rollout storage、runner、日志和 checkpoint
 组件。运行时不再依赖
 LZHMine 源码或 `LZHMINE_ROOT`。NVIDIA Isaac Gym 和带 CUDA 的 PyTorch 因
-平台及授权原因仍需在训练机中单独安装。
+平台及授权原因仍需在训练机中单独安装。项目使用两个互不混用的环境：Python
+3.8 的 `.venv` 负责训练和导出，Python 3.11 的 `.venv-mujoco` 负责 MuJoCo。
 
 训练网络采用 `DreamWAQ-Go2W` 的完整数据流，不使用 MINE。站立任务本身仍是
 Nezha 专用的四轮同时接地、静止、直立和四腿力矩/载荷均衡目标。
@@ -189,20 +190,37 @@ MuJoCo 模型沿用桌面版 URDF 的质量、惯量、关节位置与关节限�
 的基础几何体。`trunk.STL` 超过 MuJoCo STL 面数限制，所以仅视觉显示使用保持原始
 尺寸的降面副本，机身碰撞和动力学参数不受影响。
 
-### 1. 安装 MuJoCo
+### 1. 创建独立的 MuJoCo 环境
 
-在训练使用的 Python 3.8 虚拟环境中安装固定版本：
+不要把 MuJoCo 安装进 Isaac Gym 使用的 Python 3.8 `.venv`。按照 LZHMine 的
+MuJoCo 环境方式，另外创建 Python 3.11 环境；为保证两边可重复对照，NezhaStand
+把 MuJoCo 固定为 LZHMine 当前实际使用的 3.12.0：
+
+```bash
+cd ~/NezhaStand
+uv venv --python 3.11 .venv-mujoco
+source .venv-mujoco/bin/activate
+uv pip install -r mujoco/requirements.txt
+```
+
+检查环境：
+
+```bash
+python --version
+python -c "import mujoco; print(mujoco.__version__)"
+```
+
+应分别显示 Python 3.11.x 和 MuJoCo 3.12.0。该环境无需安装Isaac Gym，也不要在
+其中执行训练。
+
+### 2. 导出训练策略
+
+策略导出仍须回到包含训练模型定义的 Python 3.8 环境：
 
 ```bash
 cd ~/NezhaStand
 source .venv/bin/activate
-uv pip install --no-build-isolation -e ".[mujoco]"
 ```
-
-本项目固定 `mujoco==3.2.0`，因为该版本提供 Linux CPython 3.8 wheel。无需另外
-下载 MuJoCo 二进制文件或设置许可证。
-
-### 2. 导出训练策略
 
 默认自动选择 `logs/` 下最近一次训练及其最大编号 `model_*.pt`：
 
@@ -229,7 +247,11 @@ logs/exported/latest/policy_metadata.json
 
 ### 3. 检查模型与策略
 
+切回独立的 MuJoCo 环境：
+
 ```bash
+source ~/NezhaStand/.venv-mujoco/bin/activate
+cd ~/NezhaStand
 python scripts/validate_mujoco.py
 ```
 
@@ -241,10 +263,17 @@ contract: current_obs=46, history=5x46=230, action=12, control=50 Hz
 
 ### 4. 运行仿真
 
-打开交互式窗口并持续运行，窗口内按 `R` 可重置机器人：
+以下命令均在 `.venv-mujoco` 中执行。Linux上打开交互式窗口并持续运行，窗口内
+按 `R` 可重置机器人：
 
 ```bash
 python mujoco/nezha_stand_sim.py --duration 0
+```
+
+macOS使用MuJoCo随包提供的`mjpython`启动窗口：
+
+```bash
+.venv-mujoco/bin/mjpython mujoco/nezha_stand_sim.py --duration 0
 ```
 
 无显示器服务器上进行 10 秒测试：

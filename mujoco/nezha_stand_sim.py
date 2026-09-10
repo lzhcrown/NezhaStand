@@ -251,8 +251,8 @@ def run(args):
         import mujoco.viewer
     except ImportError as exc:
         raise RuntimeError(
-            "Install the Python-3.8-compatible package with: "
-            "uv pip install 'mujoco==3.2.0'"
+            "Activate the Python 3.11 .venv-mujoco environment and run: "
+            "uv pip install -r mujoco/requirements.txt"
         ) from exc
     if not hasattr(mujoco, "MjModel"):
         raise RuntimeError(
