@@ -319,18 +319,21 @@ python mujoco/nezha_stand_sim.py --duration 0 --log_interval 10
 python mujoco/nezha_stand_sim.py \
   --headless --duration 30 \
   --log_interval 10 \
-  --csv logs/mujoco/stand_contacts.csv
+  --csv stand_contacts.csv
 ```
 
 CSV 包含四轮接触布尔值、垂直接触力、载荷占比、载荷误差、基座姿态、漂移、
-轮速及力矩均衡指标。生成接触与载荷曲线：
+轮速及力矩均衡指标，并自动创建和保存到项目根目录的 `results/`。也可以只写
+`--csv`，此时使用 `nezha_stand_日期_时间_contacts.csv` 形式的自动文件名。
+生成接触与载荷曲线：
 
 ```bash
-python scripts/plot_mujoco_contacts.py logs/mujoco/stand_contacts.csv
+python scripts/plot_mujoco_contacts.py stand_contacts.csv
 ```
 
-默认输出 `logs/mujoco/stand_contacts.png`；使用 `--show` 可同时打开窗口，
-使用 `--output result.png` 可指定图片路径。
+默认输出 `results/stand_contacts.png`；使用 `--show` 可同时打开窗口，
+使用 `--output result.png` 可在 `results/` 中指定图片名。只有显式传入绝对路径时，
+CSV 或图片才会保存到 `results/` 之外。
 
 MuJoCo 与 PhysX 的接触求解器并不相同，因此 sim-to-sim 的第一目标不是曲线完全
 一致，而是机器人连续站立 10 秒、不倒地、不发生明显漂移或高频抖动。若结果不同，

@@ -113,7 +113,10 @@ class Contracts(unittest.TestCase):
         self.assertIn('_wheel_vertical_forces', functions)
         self.assertIn('_contact_metrics', functions)
         self.assertIn('_csv_row', functions)
+        self.assertIn('_csv_output_path', functions)
         self.assertTrue((ROOT / 'scripts/plot_mujoco_contacts.py').is_file())
+        plotter = (ROOT / 'scripts/plot_mujoco_contacts.py').read_text()
+        self.assertIn('RESULTS_DIR', plotter)
 
     def test_mujoco_uses_separate_lzhmine_aligned_environment(self):
         requirements = (ROOT / 'mujoco/requirements.txt').read_text()

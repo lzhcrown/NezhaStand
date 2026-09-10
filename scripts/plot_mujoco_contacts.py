@@ -7,6 +7,34 @@ from pathlib import Path
 
 
 WHEELS = ("FL", "FR", "RL", "RR")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+RESULTS_DIR = REPO_ROOT / "results"
+
+
+def _csv_input_path(value):
+    candidate = Path(value).expanduser()
+    if candidate.is_absolute():
+        return candidate
+
+    # Accept a path that already exists for backward compatibility. A bare
+    # filename is looked up directly in the standard results directory.
+    cwd_candidate = candidate.resolve()
+    if cwd_candidate.is_file():
+        return cwd_candidate
+    return RESULTS_DIR / candidate.name
+
+
+def _figure_output_path(value, csv_path):
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    if value:
+        candidate = Path(value).expanduser()
+        if candidate.is_absolute():
+            return candidate
+        filename = candidate.name
+        if not filename.lower().endswith(".png"):
+            filename += ".png"
+        return RESULTS_DIR / filename
+    return RESULTS_DIR / f"{csv_path.stem}.png"
 
 
 def _read_csv(path):
@@ -37,7 +65,7 @@ def plot(args):
         matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    csv_path = Path(args.csv).expanduser().resolve()
+    csv_path = _csv_input_path(args.csv)
     data = _read_csv(csv_path)
     time_s = data["time_s"]
     colors = {"FL": "#0072B2", "FR": "#D55E00", "RL": "#009E73", "RR": "#CC79A7"}
@@ -113,11 +141,7 @@ def plot(args):
     )
     figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.97))
 
-    output = (
-        Path(args.output).expanduser().resolve()
-        if args.output
-        else csv_path.with_suffix(".png")
-    )
+    output = _figure_output_path(args.output, csv_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output, dpi=args.dpi, bbox_inches="tight")
     print(f"rows:                 {len(time_s)}")
@@ -133,8 +157,14 @@ def plot(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("csv", help="CSV written by mujoco/nezha_stand_sim.py --csv")
-    parser.add_argument("--output", help="Output PNG; default uses the CSV basename")
+    parser.add_argument(
+        "csv",
+        help="CSV written by MuJoCo; a bare filename is read from results/",
+    )
+    parser.add_argument(
+        "--output",
+        help="Output PNG filename in results/ (an absolute path overrides it)",
+    )
     parser.add_argument("--dpi", type=int, default=180)
     parser.add_argument("--show", action="store_true", help="Also open an interactive plot window")
     return parser.parse_args()

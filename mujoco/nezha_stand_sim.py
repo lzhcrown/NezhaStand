@@ -13,6 +13,7 @@ import yaml
 
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+RESULTS_DIR = os.path.join(REPO_ROOT, "results")
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
@@ -23,6 +24,27 @@ def _resolve(path):
     if not path:
         return None
     return path if os.path.isabs(path) else os.path.join(REPO_ROOT, path)
+
+
+def _csv_output_path(value):
+    """Resolve generated CSV files into the repository results directory."""
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    if value == "auto":
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        return os.path.join(RESULTS_DIR, f"nezha_stand_{timestamp}_contacts.csv")
+
+    expanded = os.path.expanduser(value)
+    if os.path.isabs(expanded):
+        return expanded
+
+    # A relative directory supplied by an older command (for example
+    # logs/mujoco/foo.csv) must not scatter generated files around the repo.
+    filename = os.path.basename(expanded.rstrip(os.sep))
+    if not filename:
+        raise ValueError("--csv must be a CSV filename or be used without a value")
+    if not filename.lower().endswith(".csv"):
+        filename += ".csv"
+    return os.path.join(RESULTS_DIR, filename)
 
 
 def _load_config(path):
@@ -363,7 +385,7 @@ def run(args):
     csv_handle = None
     csv_writer = None
     if args.csv:
-        csv_path = _resolve(args.csv)
+        csv_path = _csv_output_path(args.csv)
         os.makedirs(os.path.dirname(csv_path), exist_ok=True)
         csv_handle = open(csv_path, "w", newline="", encoding="utf-8")
         csv_writer = csv.DictWriter(csv_handle, fieldnames=CSV_FIELDS)
@@ -504,7 +526,13 @@ def parse_args():
     )
     parser.add_argument(
         "--csv",
-        help="Write one contact/force/torque row per 50 Hz policy step (relative paths use the repository root)",
+        nargs="?",
+        const="auto",
+        help=(
+            "Write one contact/force/torque row per 50 Hz policy step. "
+            "With no value, use an automatic timestamped name in results/. "
+            "Relative filenames are also saved in results/; an absolute path overrides it."
+        ),
     )
     return parser.parse_args()
 
