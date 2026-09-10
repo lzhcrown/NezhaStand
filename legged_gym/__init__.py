@@ -29,6 +29,14 @@
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
 import os
+import numpy as np
+
+# Isaac Gym Preview 4 still annotates helpers with ``np.float``. NumPy 1.24
+# removed that deprecated alias, so restore it before isaacgym.torch_utils is
+# imported by the environment modules. The supported environment remains pinned
+# to NumPy 1.23.5; this guard makes accidental upgrades fail less opaquely.
+if "float" not in np.__dict__:
+    np.float = float
 
 LEGGED_GYM_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 LEGGED_GYM_ENVS_DIR = os.path.join(LEGGED_GYM_ROOT_DIR, 'legged_gym', 'envs')

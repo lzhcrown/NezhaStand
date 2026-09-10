@@ -9,7 +9,8 @@ description = "Standalone Isaac Gym training project for Nezha standing"
 requires-python = ">=3.8,<3.9"
 dependencies = [
     "matplotlib>=3.3,<3.8",
-    "numpy>=1.20,<1.24",
+    # Isaac Gym Preview 4 imports the removed np.float alias.
+    "numpy==1.23.5",
     "PyYAML>=5.4,<7",
     "scipy>=1.6,<1.11",
     # TensorBoard 2.14 dropped Python 3.8 support.

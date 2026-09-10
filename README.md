@@ -59,6 +59,15 @@ uv pip install --no-build-isolation -e /path/to/isaacgym/python
 uv pip install --no-build-isolation -e .
 ```
 
+如果虚拟环境以前安装过 NumPy 1.24 或更高版本，`git pull` 不会自动降级，需执行：
+
+```bash
+uv pip install --force-reinstall "numpy==1.23.5"
+```
+
+Isaac Gym Preview 4 的 `torch_utils.py` 仍使用已经废弃的 `np.float`，因此训练环境
+必须固定使用 NumPy 1.23.5。
+
 确认导入的训练组件都来自本仓库：
 
 ```bash

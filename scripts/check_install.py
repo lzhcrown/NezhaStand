@@ -23,6 +23,17 @@ def main():
         errors.append('Isaac Gym Preview 4 environment must use Python 3.8')
 
     try:
+        import numpy as np
+        print(f'NumPy:     {np.__version__}')
+        if np.__version__ != '1.23.5':
+            errors.append(
+                'Isaac Gym environment must use numpy==1.23.5; run: '
+                'uv pip install --force-reinstall numpy==1.23.5'
+            )
+    except Exception as exc:
+        errors.append(f'NumPy import failed: {exc}')
+
+    try:
         from isaacgym import gymapi  # noqa: F401
         import isaacgym
         print(f'Isaac Gym: OK ({Path(isaacgym.__file__).resolve()})')
