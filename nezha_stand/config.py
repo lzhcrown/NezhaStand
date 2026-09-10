@@ -92,17 +92,23 @@ class NezhaStandCfg(LeggedRobotCfg):
 
     class rewards(LeggedRobotCfg.rewards):
         only_positive_rewards = False
-        base_height_target = 0.50  # initial estimate; needs physical validation
+        # LZHMine also targets 0.50 m. Unlike a nominal-joint reward, this
+        # constrains only body geometry and leaves all leg angles policy-free.
+        base_height_target = 0.50
+        height_error_scale = 0.10
+        height_gate_start = 0.45
         soft_dof_pos_limit = 0.9
         max_contact_force = 450.0
         contact_threshold = 5.0
-        termination_cost = -5.0  # one-off penalty, not a rate multiplied by dt
+        termination_cost = -10.0  # one-off penalty, not multiplied by dt
         class scales:
             # Primary four-wheel-on-ground standing objectives.  There is
             # deliberately no default/nominal joint-position reward: the
             # default angles are only the reset pose and PD action origin.
             upright = 3.0
-            height = 3.0
+            # LZHMine-style non-saturating squared height error, normalized by
+            # 0.10 m so a 0.10 m crouch costs 4 reward units per second.
+            height = -4.0
             stationary = 1.0
             support = 2.0
 
@@ -121,7 +127,7 @@ class NezhaStandCfg(LeggedRobotCfg):
             # Generic stability, smoothness and hardware-safety regularizers.
             lin_vel_z = -2.0
             ang_vel_xy = -0.2
-            collision = -1.0
+            collision = -2.0
             action_rate = -0.02
             torques = -2.5e-6
             dof_vel = -1e-3
@@ -131,7 +137,9 @@ class NezhaStandCfg(LeggedRobotCfg):
 
     class termination:
         max_tilt_rad = 0.7853981634
-        min_height = 0.30
+        # Nominal URDF geometry places the base near 0.47 m with wheels on the
+        # floor. 0.42 m permits settling but rejects the learned crouch.
+        min_height = 0.42
         max_displacement = 0.50
         contact_threshold = 5.0
 
@@ -195,4 +203,4 @@ class NezhaStandCfgPPO(LeggedRobotCfgPPO):
         max_iterations = 20000
         save_interval = 100
         experiment_name = 'nezha_stand'
-        run_name = 'dreamwaq_stand'
+        run_name = 'dreamwaq_stand_height_v2'

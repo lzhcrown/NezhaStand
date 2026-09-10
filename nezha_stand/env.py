@@ -32,6 +32,10 @@ class NezhaStandEnv(LeggedRobot):
         self.base_height = self.root_states[:, 2].clone()
         self.failure_buf = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.episode_return = torch.zeros(self.num_envs, device=self.device)
+        self.episode_height_sum = torch.zeros(self.num_envs, device=self.device)
+        self.episode_standing_height_steps = torch.zeros(
+            self.num_envs, device=self.device
+        )
 
     def _get_noise_scale_vec(self, cfg):
         self.add_noise = cfg.noise.add_noise
@@ -93,6 +97,10 @@ class NezhaStandEnv(LeggedRobot):
         super().compute_reward()
         self.rew_buf += self.cfg.rewards.termination_cost * self.failure_buf.float()
         self.episode_return += self.rew_buf
+        self.episode_height_sum += self.base_height
+        self.episode_standing_height_steps += (
+            self.base_height >= self.cfg.rewards.height_gate_start
+        ).float()
 
     def _observations(self, noise):
         ids, s = self.leg_indices, self.obs_scales
@@ -127,7 +135,7 @@ class NezhaStandEnv(LeggedRobot):
             self.base_height - self.cfg.rewards.base_height_target,
             self.base_lin_vel[:, :2].norm(dim=1),
             self.saturation / self.cfg.control.decimation,
-            self._reward_support(),
+            self._all_feet_contact(),
             (self.root_states[:, :2] - self.start_xy).norm(dim=1),
             self.dof_vel[:, self.wheel_indices].square().mean(1).sqrt(),
             self.episode_length_buf.float() * self.dt,
@@ -148,9 +156,16 @@ class NezhaStandEnv(LeggedRobot):
             return
         completed = env_ids[self.episode_length_buf[env_ids] > 0]
         if completed.numel():
+            completed_steps = self.episode_length_buf[completed].float().clamp_min(1.0)
             self.extras['episode'] = {
                 'return': self.episode_return[completed].mean().item(),
-                'survival': self.time_out_buf[completed].float().mean().item()}
+                'survival': self.time_out_buf[completed].float().mean().item(),
+                'base_height_m': (
+                    self.episode_height_sum[completed] / completed_steps
+                ).mean().item(),
+                'standing_height_fraction': (
+                    self.episode_standing_height_steps[completed] / completed_steps
+                ).mean().item()}
             for name in self.episode_sums:
                 self.extras['episode']['reward/' + name] = (
                     self.episode_sums[name][completed] /
@@ -170,7 +185,9 @@ class NezhaStandEnv(LeggedRobot):
         self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.root_states),
                                                     gymtorch.unwrap_tensor(ids32), len(env_ids))
         for buf in (self.actions, self.last_actions, self.last_last_actions, self.last_dof_vel,
-                    self.episode_return, self.episode_length_buf, self.torques, self.raw_torques):
+                    self.episode_return, self.episode_height_sum,
+                    self.episode_standing_height_steps, self.episode_length_buf,
+                    self.torques, self.raw_torques):
             buf[env_ids] = 0
         self.contact_forces[env_ids] = 0
         for buf in self.episode_sums.values():
@@ -186,14 +203,37 @@ class NezhaStandEnv(LeggedRobot):
         return torch.exp(-torch.sum((self.projected_gravity - self.gravity_vec)**2, dim=1) / 0.05)
 
     def _reward_height(self):
-        return torch.exp(-(self.base_height - self.cfg.rewards.base_height_target)**2 / 0.0025)
+        # A quadratic penalty keeps a useful gradient far below the target;
+        # the old Gaussian reward saturated near zero and allowed crouching.
+        normalized_error = (
+            (self.base_height - self.cfg.rewards.base_height_target)
+            / self.cfg.rewards.height_error_scale
+        )
+        return normalized_error.square()
+
+    def _standing_height_gate(self):
+        """Smoothly unlock positive standing rewards from 0.45 to 0.50 m."""
+        start = self.cfg.rewards.height_gate_start
+        target = self.cfg.rewards.base_height_target
+        return ((self.base_height - start) / (target - start)).clamp(0.0, 1.0)
 
     def _reward_stationary(self):
-        return torch.exp(-self.base_lin_vel.square().sum(1) / 0.04 - self.base_ang_vel.square().sum(1) / 0.25)
+        stationary = torch.exp(
+            -self.base_lin_vel.square().sum(1) / 0.04
+            - self.base_ang_vel.square().sum(1) / 0.25
+        )
+        return stationary * self._standing_height_gate()
 
     def _reward_support(self):
         """Reward only when all four wheels carry a non-trivial vertical load."""
-        return (self.contact_forces[:, self.feet_indices, 2] > self.cfg.rewards.contact_threshold).all(1).float()
+        return self._all_feet_contact() * self._standing_height_gate()
+
+    def _all_feet_contact(self):
+        """Raw four-wheel contact indicator used by evaluation metrics."""
+        return (
+            self.contact_forces[:, self.feet_indices, 2]
+            > self.cfg.rewards.contact_threshold
+        ).all(1).float()
 
     def _normalized_foot_loads(self):
         """Vertical wheel loads as fractions of the total supported load."""
