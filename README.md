@@ -1,6 +1,6 @@
 # NezhaStand：DreamWaQ 四足静态站立
 
-本项目以 ROS 包 `nezha_description` 的 Nezha URDF 为机器人资产，并在仓库内自带站立训练所需的
+本项目以桌面版 Nezha URDF 为机器人资产，并在仓库内自带站立训练所需的
 `legged_gym` 基础环境、任务注册与参数工具，以及 `rsl_rl` 的 DreamWaQ
 Actor-Critic、VAE 历史估计器、PPO、rollout storage、runner、日志和 checkpoint
 组件。运行时不再依赖
@@ -13,7 +13,7 @@ Nezha 专用的四轮同时接地、静止、直立和四腿力矩/载荷均衡�
 
 ```text
 NezhaStand/
-├── assets/nezha/       # 从 nezha_description 导入的 URDF 与全部 STL
+├── assets/nezha/       # 桌面版 URDF 与全部 STL
 ├── legged_gym/         # 仿真环境基类、配置、地形与任务注册
 ├── rsl_rl/             # Actor-Critic、PPO、storage 与 runner
 ├── nezha_stand/        # Nezha 站立任务配置、环境和奖励
@@ -38,10 +38,7 @@ NezhaStand/
   支撑正奖励，低于0.42 m终止，避免策略通过低趴换取低力矩；
 - 保留直立和静止目标，并对四腿对应关节的归一化力矩幅值平方差施加惩罚；
 - 增加四轮垂直载荷占比均衡和接触轮水平打滑惩罚；
-- 参考 LZHMine，在零速度站立任务中使用全腿默认姿态 L1 惩罚和额外髋关节 L2
-  惩罚，避免后腿折叠；
-- `default_dof_pos` 使用镜像站立角：左髋 -0.10、右髋 +0.10、四腿 thigh 0.925、
-  calf -1.85 rad；PD 刚度为 hip/thigh/calf = 150/150/300 N·m/rad；
+- `default_dof_pos` 采用桌面 `config.yaml` 的 FL/FR/RL/RR 定义，但不设置初始姿态奖励；
 - 平地、固定摩擦、无推搡、无载荷/质心/电机随机化；
 - 初始腿关节仅加入 +/-0.02 rad 扰动。
 
@@ -84,30 +81,12 @@ python scripts/check_install.py
 `nezha_stand` 的实际导入路径。后三条路径都应位于 `/path/to/NezhaStand`，
 不应出现 LZHMine。
 
-## 2. 同步机器人描述与静态检查
-
-当前资产来自 `/home/crown/nezha_description` 中较新的
-`urdf/nezha_description.urdf`。该目录没有 MuJoCo MJCF；`package.xml` 和 launch XML
-不能由 MuJoCo 加载。源 URDF 虽可被 MuJoCo 3.12 解析，但它用 fixed joint 把
-`base` 固定到 `trunk`，且没有 MuJoCo actuator、传感器和地面，因此不能直接作为
-自由基座 sim-to-sim 场景。同步脚本会复制全部 23 个 STL，
-把 `package://` URL 改成仓库相对路径，移除 ROS/Gazebo 专用的虚拟 `base`、plugin 和
-transmission，并以相同质量、惯量、关节原点、轴、限位和碰撞体重新生成
-`mujoco/models/nezha.xml`。保留 `trunk` 为根刚体是 Isaac Gym 接触终止逻辑所需。
-
-以后源目录再次修改时执行：
-
-```bash
-python3 scripts/sync_nezha_description.py \
-  --source /home/crown/nezha_description
-```
-
-随后做源资产逐项校验：
+## 2. 静态检查
 
 ```bash
 cd /path/to/NezhaStand
 source .venv/bin/activate
-python3 scripts/validate_assets.py --source /home/crown/nezha_description
+python3 scripts/validate_assets.py
 python3 scripts/validate_phase1.py
 python3 scripts/check_dreamwaq.py
 ```
@@ -115,8 +94,8 @@ python3 scripts/check_dreamwaq.py
 第三条命令无需启动 Isaac Gym，会用 CPU 完成一次 DreamWaQ 前向、rollout storage
 和 PPO+VAE 反向更新，输出 `DreamWaQ smoke test: OK` 才表示网络链路完整。
 
-不带 `--source` 时只检查仓库内 URDF 的拓扑、16-DOF 命名和 mesh 引用；带参数时还会
-比较所有物理 link/joint 属性和全部 STL 的 SHA-256。
+若训练机上另有原始 `nezha` 目录，可用
+`python3 scripts/validate_assets.py --source /path/to/nezha` 做逐文件校验。
 
 ## 3. GPU 物理检查
 
@@ -144,10 +123,9 @@ python scripts/train.py --headless --num_envs 256 --max_iterations 100
 python scripts/train.py --headless --num_envs 2048 --max_iterations 20000
 ```
 
-本版运行名为 `dreamwaq_stand_nezha_description_pose_v3`。机器人质量、惯量、几何、
-碰撞体和关节限位都已变化，旧 checkpoint/`policy.pt` 不能续训或用于结果判定；
-runner 和导出器会用 URDF SHA-256 拒绝不匹配的 checkpoint。应从头建立新运行。
-TensorBoard除奖励外还应观察`Episode/base_height_m`和
+本版奖励运行名为`dreamwaq_stand_height_v2`。不要从旧的
+`dreamwaq_stand/model_7000.pt`续训；旧策略已经学到低趴局部最优，应从头建立
+新运行。TensorBoard除奖励外还应观察`Episode/base_height_m`和
 `Episode/standing_height_fraction`。
 
 建议先观察 1000 次迭代的曲线。若存活率没有持续提高，依次检查终止原因、
@@ -184,23 +162,20 @@ python scripts/evaluate.py --headless --checkpoint_path /path/to/model_20000.pt 
 | 四腿对应关节力矩差 RMS | <= 10 N·m |
 | 四轮载荷占比误差 RMS | <= 0.10 |
 | 接触轮水平速度 RMS | <= 0.05 m/s |
-| 12 个腿关节默认姿态误差 RMS | <= 0.15 rad |
 
 高度约束不能在基础站立阶段直接删除。旧的指数高度奖励在误差较大时趋近零，
 导致继续降低机身几乎没有额外代价；现在改为参考LZHMine形式的平方误差，并按
 0.10 m归一化，使整个低趴区间都有有效梯度。静止与支撑正奖励还会通过0.45–0.50 m
-的连续高度门控。高度、静止和支撑三类约束本身只使用基座高度、接触和速度；
-默认关节姿态则由下面两个独立惩罚项负责。`torque_balance`奖励比较四条腿上
+的连续高度门控。所有这些约束只使用基座高度、接触和速度，不要求关节保持某组
+角度。`torque_balance`奖励比较四条腿上
 同类型关节的力矩幅值（hip 对 hip、thigh 对 thigh、calf 对 calf），并先除以
 各关节力矩上限再计算六组腿对的平方差。使用幅值是因为左右髋关节在镜像坐标系
 中可能需要符号相反但物理效果对称的力矩；归一化则避免力矩上限较大的关节主导
-奖励。该项并不能单独保证合理站立，因此仍保留机身直立、高度、接触、漂移、总力矩
-以及默认关节姿态约束。`default_pose=-3.0` 使用 12 个腿关节相对默认角的绝对误差和；
-`hip_default=-8.0` 额外约束四个镜像髋角。`foot_force_balance` 使用四轮竖直载荷占
-总载荷的比例，与机器人总质量无关；`foot_slip` 只惩罚已经接地轮足中心的水平移动。
-任务仍不包含抬脚高度、腾空时间、步态相位或速度跟踪奖励。相较 LZHMine 的复杂地形
-运动配置，本任务保留较小的 0.15 动作尺度、平地和零速度命令，使策略只能在默认姿态
-附近做必要的重力补偿，而不会为了 locomotion 大幅改变腿形。
+奖励。该项并不能单独保证合理站立，因此仍保留机身直立、高度、接触、漂移和总力矩
+约束。`foot_force_balance` 使用四轮竖直载荷占总载荷的比例，与机器人总质量无关；
+`foot_slip` 只惩罚已经接地轮足中心的水平移动。配置中没有默认关节角度、抬脚高度、
+腾空时间或步态奖励。默认关节角度仅用于复位姿态、PD 零动作参考和观测归一化，策略
+仍可通过持续动作残差选择自己的稳态关节角度。
 
 为避免偶然性，正式进入第二阶段前应使用至少三个不同随机种子训练；至少两个
 种子的 checkpoint 通过上述 1024 episode 验收，且可视化中没有明显高频抖动。
@@ -213,18 +188,17 @@ python scripts/evaluate.py --headless --checkpoint_path /path/to/model_20000.pt 
 ```text
 deploy/nezha_stand/policy_runtime.py  # 46 当前观测、230 历史观测及 PD 控制
 mujoco/nezha_stand_config.yaml        # 关节顺序、增益、限幅与仿真频率
-mujoco/models/nezha.xml               # 由当前 nezha_description URDF 生成的 MJCF
+mujoco/models/nezha.xml               # 桌面版 URDF 对应的浮动基座 MJCF
 mujoco/models/nezha_scene.xml         # 平地与光照场景
 mujoco/nezha_stand_sim.py             # MuJoCo 闭环仿真入口
 scripts/export_policy.py              # checkpoint -> TorchScript policy.pt
 scripts/validate_mujoco.py            # 模型和策略契约检查
 ```
 
-MuJoCo 模型与当前导入 URDF 使用相同的 77.840691 kg 总质量、惯量、关节位置与
-关节限制。碰撞体严格采用源 URDF：机身和 top box 为 box，四条小腿为 box，四个
-轮子为半径 0.105 m、宽度 0.040 m 的 cylinder；髋、大腿、电机、IMU 和雷达只有
-视觉几何。新 `trunk.STL` 已降至 5 万三角面，可由 MuJoCo 3.12 直接加载，不再需要
-旧的 `mujoco/models/assets/trunk_visual.stl`。
+MuJoCo 模型沿用桌面版 URDF 的质量、惯量、关节位置与关节限制。腿部碰撞体使用
+桌面版 URDF 指定的 thigh/calf collision STL；轮子、髋关节、机身和雷达使用对应
+的基础几何体。`trunk.STL` 超过 MuJoCo STL 面数限制，所以仅视觉显示使用保持原始
+尺寸的降面副本，机身碰撞和动力学参数不受影响。
 
 ### 1. 创建独立的 MuJoCo 环境
 
@@ -274,13 +248,12 @@ python scripts/export_policy.py \
 默认输出位置为：
 
 ```text
-logs/exported/nezha_description_pose_v3/policy.pt
-logs/exported/nezha_description_pose_v3/policy_metadata.json
+logs/exported/latest/policy.pt
+logs/exported/latest/policy_metadata.json
 ```
 
 导出脚本不启动 Isaac Gym，并会验证策略双输入 `[1, 46]`、`[1, 230]`，输出
-`[1, 12]`，同时把当前 URDF 哈希写入 metadata。旧版普通 PPO checkpoint 或基于
-旧机器人资产训练的 DreamWaQ checkpoint 都不能继续训练或导出。
+`[1, 12]`。旧版普通 PPO checkpoint 与新网络形状不兼容，不能继续训练或导出。
 
 ### 3. 检查模型与策略
 
@@ -350,8 +323,7 @@ python mujoco/nezha_stand_sim.py \
 ```
 
 CSV 包含四轮接触布尔值、垂直接触力、载荷占比、载荷误差、基座姿态、漂移、
-轮速、默认关节姿态 RMSE 及力矩均衡指标，并自动创建和保存到项目根目录的
-`results/`。也可以只写
+轮速及力矩均衡指标，并自动创建和保存到项目根目录的 `results/`。也可以只写
 `--csv`，此时使用 `nezha_stand_日期_时间_contacts.csv` 形式的自动文件名。
 生成接触与载荷曲线：
 

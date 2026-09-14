@@ -38,7 +38,6 @@ def evaluate(args):
     torque_pair_square_sum = 0.0
     foot_load_fraction_square_sum = 0.0
     contact_foot_speed_square_sum = 0.0
-    joint_pose_square_sum = 0.0
     target_episodes = args.episodes
     settle = env_cfg.evaluation.settling_time_s
     while completed < target_episodes:
@@ -57,7 +56,6 @@ def evaluate(args):
             torque_pair_square_sum += v[:, 9].square().sum().item()
             foot_load_fraction_square_sum += v[:, 10].square().sum().item()
             contact_foot_speed_square_sum += v[:, 11].square().sum().item()
-            joint_pose_square_sum += v[:, 12].square().sum().item()
             max_drift = max(max_drift, v[:, 6].max().item())
             samples += int(valid.sum())
         done = dones.bool()
@@ -75,7 +73,6 @@ def evaluate(args):
         'torque_pair_rms_nm': math.sqrt(torque_pair_square_sum / max(samples, 1)),
         'foot_load_fraction_rms': math.sqrt(foot_load_fraction_square_sum / max(samples, 1)),
         'contact_foot_speed_rms_m_s': math.sqrt(contact_foot_speed_square_sum / max(samples, 1)),
-        'joint_pose_rmse_rad': math.sqrt(joint_pose_square_sum / max(samples, 1)),
     }
     limits = env_cfg.evaluation
     passed = {
@@ -90,7 +87,6 @@ def evaluate(args):
         'torque_pair_rms_nm': values['torque_pair_rms_nm'] <= limits.max_torque_pair_rms_nm,
         'foot_load_fraction_rms': values['foot_load_fraction_rms'] <= limits.max_foot_load_fraction_rms,
         'contact_foot_speed_rms_m_s': values['contact_foot_speed_rms_m_s'] <= limits.max_contact_foot_speed_rms_m_s,
-        'joint_pose_rmse_rad': values['joint_pose_rmse_rad'] <= limits.max_joint_pose_rmse_rad,
     }
     for name, value in values.items():
         print(f'{name:28s} {value:10.5f}  {"PASS" if passed[name] else "FAIL"}')

@@ -48,15 +48,13 @@ class NezhaStandCfg(LeggedRobotCfg):
             f'{leg}_{joint}_joint': value
             for leg in ('FL', 'FR', 'RL', 'RR')
             for joint, value in (
-                # Symmetric standing reference; valid for the imported URDF limits.
-                # LZHMine convention: left hips negative, right hips positive.
-                ('hip', -0.10 if leg in ('FL', 'RL') else 0.10),
+                # Matches Desktop/config.yaml default_dof_pos in FL/FR/RL/RR order.
+                ('hip', 0.10 if leg in ('FL', 'RL') else -0.10),
                 ('thigh', 0.925), ('calf', -1.85), ('foot', 0.0))}
 
     class control(LeggedRobotCfg.control):
-        # Proven Nezha standing/locomotion gains from LZHMine.
-        stiffness = {'hip_joint': 150.0, 'thigh_joint': 150.0,
-                     'calf_joint': 300.0, 'foot_joint': 0.0}
+        stiffness = {'hip_joint': 150.0, 'thigh_joint': 220.0,
+                     'calf_joint': 220.0, 'foot_joint': 0.0}
         damping = {'hip_joint': 4.0, 'thigh_joint': 4.0,
                    'calf_joint': 4.0, 'foot_joint': 1.2}
         control_type = 'P'
@@ -71,10 +69,8 @@ class NezhaStandCfg(LeggedRobotCfg):
         leg_dof_names = LEG_NAMES
         foot_name = 'foot'
         wheel_name = ['foot_joint']
-        # The imported description intentionally defines collision shapes only
-        # for trunk/top_box, calves and wheels.
-        penalize_contacts_on = ['calf']
-        terminate_after_contacts_on = ['trunk']
+        penalize_contacts_on = ['hip', 'thigh', 'calf']
+        terminate_after_contacts_on = ['trunk', 'hip']
         collapse_fixed_joints = True
         self_collisions = 1
         replace_cylinder_with_capsule = False
@@ -96,9 +92,8 @@ class NezhaStandCfg(LeggedRobotCfg):
 
     class rewards(LeggedRobotCfg.rewards):
         only_positive_rewards = False
-        # LZHMine also targets a 0.50 m body height. Height and nominal-joint
-        # rewards complement each other: one prevents crouching, the other
-        # preserves the intended mirrored leg geometry.
+        # LZHMine also targets 0.50 m. Unlike a nominal-joint reward, this
+        # constrains only body geometry and leaves all leg angles policy-free.
         base_height_target = 0.50
         height_error_scale = 0.10
         height_gate_start = 0.45
@@ -107,19 +102,15 @@ class NezhaStandCfg(LeggedRobotCfg):
         contact_threshold = 5.0
         termination_cost = -10.0  # one-off penalty, not multiplied by dt
         class scales:
-            # Primary four-wheel-on-ground standing objectives.
+            # Primary four-wheel-on-ground standing objectives.  There is
+            # deliberately no default/nominal joint-position reward: the
+            # default angles are only the reset pose and PD action origin.
             upright = 3.0
             # LZHMine-style non-saturating squared height error, normalized by
             # 0.10 m so a 0.10 m crouch costs 4 reward units per second.
             height = -4.0
             stationary = 1.0
             support = 2.0
-
-            # LZHMine's zero-command posture constraints. The full-leg L1
-            # term prevents folded knees; the hip L2 term preserves the
-            # mirrored lateral stance. Wheels are excluded from both terms.
-            default_pose = -3.0
-            hip_default = -8.0
 
             # Mean squared difference of normalized |torque| between the six
             # leg pairs, compared only between corresponding joint types.
@@ -146,8 +137,8 @@ class NezhaStandCfg(LeggedRobotCfg):
 
     class termination:
         max_tilt_rad = 0.7853981634
-        # Nominal imported geometry places the base near 0.50 m with wheels on
-        # the floor. 0.42 m permits settling but rejects a collapsed crouch.
+        # Nominal URDF geometry places the base near 0.47 m with wheels on the
+        # floor. 0.42 m permits settling but rejects the learned crouch.
         min_height = 0.42
         max_displacement = 0.50
         contact_threshold = 5.0
@@ -165,7 +156,6 @@ class NezhaStandCfg(LeggedRobotCfg):
         max_torque_pair_rms_nm = 10.0
         max_foot_load_fraction_rms = 0.10
         max_contact_foot_speed_rms_m_s = 0.05
-        max_joint_pose_rmse_rad = 0.15
 
     class normalization(LeggedRobotCfg.normalization):
         clip_actions = 3.0  # +/-0.45 rad residual, additionally clamped to limits
@@ -213,5 +203,4 @@ class NezhaStandCfgPPO(LeggedRobotCfgPPO):
         max_iterations = 20000
         save_interval = 100
         experiment_name = 'nezha_stand'
-        # Asset dynamics changed materially; do not mix with height_v2 checkpoints.
-        run_name = 'dreamwaq_stand_nezha_description_pose_v3'
+        run_name = 'dreamwaq_stand_height_v2'

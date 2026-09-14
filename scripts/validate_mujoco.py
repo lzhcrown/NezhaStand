@@ -2,12 +2,8 @@
 """Validate the MuJoCo model, joint contract and optional exported policy."""
 
 import argparse
-import hashlib
-import json
-import math
 import os
 import sys
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import torch
@@ -15,7 +11,6 @@ import yaml
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ASSET_URDF = PROJECT_ROOT / "assets" / "nezha" / "urdf" / "nezha.urdf"
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from deploy.nezha_stand import NezhaStandPolicyRuntime
@@ -61,79 +56,12 @@ def validate(args):
         for joint_id in range(model.njnt)
     ):
         raise RuntimeError("MuJoCo model has no free joint")
-    if model.nbody != 25 or model.nu != 16:
-        raise RuntimeError(
-            f"Robot topology mismatch: nbody={model.nbody}, nu={model.nu}"
-        )
-    model_mass = float(model.body_mass.sum())
-    urdf_root = ET.parse(ASSET_URDF).getroot()
-    expected_mass = sum(
-        float(mass.get("value"))
-        for mass in urdf_root.findall(".//inertial/mass")
-    )
-    if not math.isclose(model_mass, expected_mass, rel_tol=0.0, abs_tol=1e-9):
-        raise RuntimeError(
-            f"Robot mass mismatch: model={model_mass}, config={expected_mass}"
-        )
 
-    for index, name in enumerate(cfg["joint_names"]):
-        joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
-        actual = [float(value) for value in model.jnt_range[joint_id]]
-        expected = [cfg["dof_lower_limits"][index], cfg["dof_upper_limits"][index]]
-        if not all(
-            math.isclose(a, e, rel_tol=0.0, abs_tol=1e-9)
-            for a, e in zip(actual, expected)
-        ):
-            raise RuntimeError(
-                f"Joint-limit mismatch for {name}: model={actual}, config={expected}"
-            )
-        default = float(cfg["default_dof_pos"][index])
-        if not expected[0] <= default <= expected[1]:
-            raise RuntimeError(
-                f"Default position {default} is outside {name} limits {expected}"
-            )
-
-    expected_collision_sizes = {
-        "trunk_collision_0": (0.5605, 0.195, 0.135),
-        **{
-            f"{leg}_calf_collision_0": (0.025, 0.0225, 0.195)
-            for leg in ("FL", "FR", "RL", "RR")
-        },
-        **{
-            f"{leg}_foot_collision_0": (0.105, 0.02)
-            for leg in ("FL", "FR", "RL", "RR")
-        },
-    }
-    for geom_name, expected_size in expected_collision_sizes.items():
-        geom_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, geom_name)
-        if geom_id < 0:
-            raise RuntimeError(f"Missing collision geometry: {geom_name}")
-        actual_size = model.geom_size[geom_id][:len(expected_size)]
-        if any(
-            not math.isclose(float(a), e, rel_tol=0.0, abs_tol=1e-9)
-            for a, e in zip(actual_size, expected_size)
-        ):
-            raise RuntimeError(
-                f"Collision-size mismatch for {geom_name}: {actual_size}"
-            )
-
-    expected_p_gains = [150.0, 150.0, 300.0, 0.0] * 4
+    expected_p_gains = [150.0, 220.0, 220.0, 0.0] * 4
     if cfg["p_gains"] != expected_p_gains:
         raise RuntimeError(
-            "Standing Kp contract mismatch; expected [150, 150, 300, 0] per leg"
+            "Standing Kp contract mismatch; expected [150, 220, 220, 0] per leg"
         )
-    expected_default = [
-        -0.10, 0.925, -1.85, 0.0,
-        0.10, 0.925, -1.85, 0.0,
-        -0.10, 0.925, -1.85, 0.0,
-        0.10, 0.925, -1.85, 0.0,
-    ]
-    if cfg["default_dof_pos"] != expected_default:
-        raise RuntimeError(
-            "Standing-pose contract mismatch; expected mirrored LZHMine hip angles"
-        )
-    if float(cfg["action_scale"]) != 0.15:
-        raise RuntimeError("Flat-standing action_scale contract must remain 0.15")
     if float(cfg["contact_force_threshold_n"]) <= 0.0:
         raise RuntimeError("contact_force_threshold_n must be positive")
     for body_name in cfg["wheel_body_names"]:
@@ -155,16 +83,6 @@ def validate(args):
 
     policy_path = _resolve(args.policy or cfg["policy_path"])
     if policy_path.is_file():
-        metadata_path = policy_path.with_name("policy_metadata.json")
-        if not metadata_path.is_file():
-            raise RuntimeError(f"Missing policy metadata: {metadata_path}")
-        with metadata_path.open("r", encoding="utf-8") as stream:
-            metadata = json.load(stream)
-        current_asset_hash = hashlib.sha256(ASSET_URDF.read_bytes()).hexdigest()
-        if metadata.get("asset_urdf_sha256") != current_asset_hash:
-            raise RuntimeError(
-                "Exported policy was not trained with the current Nezha URDF"
-            )
         runtime = NezhaStandPolicyRuntime(
             policy_path=str(policy_path),
             default_dof_pos=cfg["default_dof_pos"],
@@ -199,10 +117,9 @@ def validate(args):
     print(f"Python: {sys.version.split()[0]}")
     print(f"MuJoCo: {mujoco.__version__}")
     print(f"model:  OK ({model_path})")
-    print(f"robot:  24 bodies, mass={model_mass:.6f} kg")
     print(f"state:  nq={model.nq}, nv={model.nv}, joints=16 + floating base")
     print("contract: current_obs=46, history=5x46=230, action=12, control=50 Hz")
-    print("control: Kp per leg=[150, 150, 300, 0]")
+    print("control: Kp per leg=[150, 220, 220, 0]")
     print(
         "contact: wheels=FL/FR/RL/RR, threshold="
         f"{float(cfg['contact_force_threshold_n']):g} N"

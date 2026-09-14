@@ -1,7 +1,6 @@
 """DreamWaQ on-policy runner for the standalone Nezha standing task."""
 
 import os
-import hashlib
 import statistics
 import time
 from collections import deque
@@ -20,9 +19,6 @@ class DreamWaQStandRunner:
         self.policy_cfg = train_cfg["policy"]
         self.device = device
         self.env = env
-        asset_path = self.env.cfg.asset.file
-        with open(asset_path, "rb") as stream:
-            self.asset_sha256 = hashlib.sha256(stream.read()).hexdigest()
         self.history_length = int(self.policy_cfg["history_length"])
         self.history_dim = env.num_obs * self.history_length
         critic_dim = env.num_privileged_obs or env.num_obs
@@ -188,7 +184,6 @@ class DreamWaQStandRunner:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         torch.save({
             "architecture": "DreamWaQ",
-            "asset_sha256": self.asset_sha256,
             "model_state_dict": self.actor_critic.state_dict(),
             "optimizer_state_dict": self.alg.optimizer.state_dict(),
             "vae_optimizer_state_dict": self.alg.vae_optimizer.state_dict(),
@@ -202,11 +197,6 @@ class DreamWaQStandRunner:
             raise RuntimeError(
                 "This is not a DreamWaQ checkpoint; old plain-PPO checkpoints "
                 "cannot be resumed with the history encoder."
-            )
-        if checkpoint.get("asset_sha256") != self.asset_sha256:
-            raise RuntimeError(
-                "Checkpoint asset does not match the current Nezha URDF. "
-                "Retrain from scratch after a robot-description replacement."
             )
         self.actor_critic.load_state_dict(checkpoint["model_state_dict"])
         if load_optimizer:

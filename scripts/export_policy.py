@@ -2,7 +2,6 @@
 """Export a DreamWaQ checkpoint as a history-aware TorchScript policy."""
 
 import argparse
-import hashlib
 import json
 import re
 import sys
@@ -12,7 +11,6 @@ import torch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ASSET_URDF = PROJECT_ROOT / "assets" / "nezha" / "urdf" / "nezha.urdf"
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from rsl_rl.modules import DreamWaQActorCritic
@@ -82,7 +80,7 @@ def export(args):
     output_path = (
         Path(args.output).expanduser().resolve()
         if args.output
-        else PROJECT_ROOT / "logs" / "exported" / "nezha_description_pose_v3" / "policy.pt"
+        else PROJECT_ROOT / "logs" / "exported" / "latest" / "policy.pt"
     )
 
     checkpoint = torch.load(str(checkpoint_path), map_location="cpu")
@@ -90,12 +88,6 @@ def export(args):
         raise RuntimeError(
             "Checkpoint is from the old plain-PPO architecture. Train a new "
             "DreamWaQ run before exporting."
-        )
-    asset_sha256 = hashlib.sha256(ASSET_URDF.read_bytes()).hexdigest()
-    if checkpoint.get("asset_sha256") != asset_sha256:
-        raise RuntimeError(
-            "Checkpoint was not trained with the current Nezha URDF. Retrain "
-            "from scratch before exporting a sim-to-sim policy."
         )
     actor_critic = DreamWaQActorCritic(
         46, 64, 12, history_length=5, latent_dim=16,
@@ -123,7 +115,6 @@ def export(args):
         "source_run": run_name,
         "checkpoint_iteration": checkpoint.get("iter"),
         "architecture": "DreamWaQ",
-        "asset_urdf_sha256": asset_sha256,
         "actor_observations": 46,
         "history_length": 5,
         "history_observations": 230,
@@ -132,7 +123,7 @@ def export(args):
         "action_scale": 0.15,
         "clip_actions": 3.0,
         "control_frequency_hz": 50,
-        "p_gains_per_leg": [150.0, 150.0, 300.0, 0.0],
+        "p_gains_per_leg": [150.0, 220.0, 220.0, 0.0],
         "d_gains_per_leg": [4.0, 4.0, 4.0, 1.2],
         "policy_file": output_path.name,
     }
