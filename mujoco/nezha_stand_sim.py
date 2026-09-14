@@ -3,6 +3,8 @@
 
 import argparse
 import csv
+import hashlib
+import json
 import math
 import os
 import sys
@@ -14,6 +16,7 @@ import yaml
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 RESULTS_DIR = os.path.join(REPO_ROOT, "results")
+ASSET_URDF = os.path.join(REPO_ROOT, "assets", "nezha", "urdf", "nezha.urdf")
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
@@ -55,6 +58,20 @@ def _load_config(path):
 def _require_file(path, label):
     if not path or not os.path.isfile(path):
         raise FileNotFoundError(f"{label} does not exist: {path}")
+
+
+def _validate_policy_asset(policy_path):
+    metadata_path = os.path.join(os.path.dirname(policy_path), "policy_metadata.json")
+    _require_file(metadata_path, "Policy metadata")
+    with open(metadata_path, "r", encoding="utf-8") as stream:
+        metadata = json.load(stream)
+    with open(ASSET_URDF, "rb") as stream:
+        asset_sha256 = hashlib.sha256(stream.read()).hexdigest()
+    if metadata.get("asset_urdf_sha256") != asset_sha256:
+        raise RuntimeError(
+            "Exported policy was not trained with the current Nezha URDF. "
+            "Retrain and export the nezha_description_pose_v3 policy first."
+        )
 
 
 def _joint_addresses(mujoco, model, names):
@@ -230,7 +247,7 @@ def _normalized_torque_balance(torques, torque_limits, leg_indices):
 
 CSV_FIELDS = [
     "time_s", "base_x_m", "base_y_m", "base_z_m", "roll_deg", "pitch_deg",
-    "drift_m", "wheel_rms_rad_s", "torque_pair_rms_nm",
+    "drift_m", "wheel_rms_rad_s", "joint_pose_rmse_rad", "torque_pair_rms_nm",
     "normalized_torque_balance", "all_four_contact", "contact_count",
     "FL_contact", "FR_contact", "RL_contact", "RR_contact",
     "FL_vertical_force_n", "FR_vertical_force_n", "RL_vertical_force_n",
@@ -241,7 +258,7 @@ CSV_FIELDS = [
 
 
 def _csv_row(simulated_time, base_position, roll, pitch, drift, wheel_rms,
-             torque_rms, normalized_torque_balance, contacts, all_contact,
+             joint_pose_rmse, torque_rms, normalized_torque_balance, contacts, all_contact,
              forces, fractions, load_error):
     names = ("FL", "FR", "RL", "RR")
     row = {
@@ -253,6 +270,7 @@ def _csv_row(simulated_time, base_position, roll, pitch, drift, wheel_rms,
         "pitch_deg": pitch,
         "drift_m": drift,
         "wheel_rms_rad_s": wheel_rms,
+        "joint_pose_rmse_rad": joint_pose_rmse,
         "torque_pair_rms_nm": torque_rms,
         "normalized_torque_balance": normalized_torque_balance,
         "all_four_contact": int(all_contact),
@@ -292,6 +310,7 @@ def run(args):
             "Export it first with: python scripts/export_policy.py --checkpoint "
             "/path/to/model_20000.pt"
         )
+    _validate_policy_asset(policy_path)
 
     model = mujoco.MjModel.from_xml_path(model_path)
     data = mujoco.MjData(model)
@@ -450,6 +469,11 @@ def run(args):
                 np.mean(np.square(data.qvel[dof_addresses][cfg["wheel_joint_indices"]]))
             ))
             torque_rms = _torque_pair_rms(last_torques, cfg["leg_joint_indices"])
+            leg_indices = np.asarray(cfg["leg_joint_indices"])
+            joint_pose_rmse = float(np.sqrt(np.mean(np.square(
+                data.qpos[qpos_addresses][leg_indices]
+                - np.asarray(cfg["default_dof_pos"])[leg_indices]
+            ))))
             normalized_torque_balance = _normalized_torque_balance(
                 last_torques, cfg["torque_limits"], cfg["leg_joint_indices"]
             )
@@ -457,7 +481,7 @@ def run(args):
             if csv_writer is not None:
                 csv_writer.writerow(_csv_row(
                     simulated_time, base_position, roll, pitch, drift, wheel_rms,
-                    torque_rms, normalized_torque_balance, contacts, all_contact,
+                    joint_pose_rmse, torque_rms, normalized_torque_balance, contacts, all_contact,
                     vertical_forces, load_fractions, load_error,
                 ))
 
@@ -468,6 +492,7 @@ def run(args):
                     f"z={base_position[2]:.3f}m roll={roll:+.2f}deg "
                     f"pitch={pitch:+.2f}deg drift={drift:.3f}m "
                     f"wheel_rms={wheel_rms:.3f}rad/s "
+                    f"pose_rmse={joint_pose_rmse:.3f}rad "
                     f"torque_pair_rms={torque_rms:.2f}Nm\n"
                     f"  contact[FL FR RL RR]={contact_bits} "
                     f"all={'YES' if all_contact else 'NO'} "

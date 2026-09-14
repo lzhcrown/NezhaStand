@@ -21,9 +21,12 @@ def check(args):
     cfg.noise.add_noise = False
     cfg.init_state.joint_jitter = 0.0
     env, _ = task_registry.make_env(TASK_NAME, args=args, env_cfg=cfg)
+    # make_env constructs actors but does not issue the task-level indexed reset.
+    # Start the diagnostic from the configured standing pose, as the trainer does.
+    env.reset()
     steps = int(args.duration / env.dt)
     failures = 0
-    height_sum = speed_sum = tilt_sum = wheel_sum = 0.0
+    height_sum = speed_sum = tilt_sum = wheel_sum = pose_sum = 0.0
     samples = 0
     for i in range(steps):
         with torch.inference_mode():
@@ -36,12 +39,14 @@ def check(args):
             speed_sum += m[:, 3].sum().item()
             tilt_sum += torch.maximum(m[:, 0].abs(), m[:, 1].abs()).sum().item()
             wheel_sum += m[:, 7].sum().item()
+            pose_sum += m[:, 12].sum().item()
             samples += env.num_envs
     print(f'zero-action failures: {failures}')
     print(f'mean height error:    {height_sum/max(samples, 1):.5f} m')
     print(f'mean XY speed:        {speed_sum/max(samples, 1):.5f} m/s')
     print(f'mean max tilt:        {tilt_sum/max(samples, 1)*57.29578:.5f} deg')
     print(f'mean wheel RMS:       {wheel_sum/max(samples, 1):.5f} rad/s')
+    print(f'mean joint pose RMSE: {pose_sum/max(samples, 1):.5f} rad')
     return 0 if failures == 0 else 2
 
 

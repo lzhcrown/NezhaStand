@@ -33,6 +33,9 @@ class NezhaStandEnv(LeggedRobot):
         self.failure_buf = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.episode_return = torch.zeros(self.num_envs, device=self.device)
         self.episode_height_sum = torch.zeros(self.num_envs, device=self.device)
+        self.episode_pose_square_sum = torch.zeros(
+            self.num_envs, device=self.device
+        )
         self.episode_standing_height_steps = torch.zeros(
             self.num_envs, device=self.device
         )
@@ -98,6 +101,7 @@ class NezhaStandEnv(LeggedRobot):
         self.rew_buf += self.cfg.rewards.termination_cost * self.failure_buf.float()
         self.episode_return += self.rew_buf
         self.episode_height_sum += self.base_height
+        self.episode_pose_square_sum += self._joint_pose_error().square().mean(1)
         self.episode_standing_height_steps += (
             self.base_height >= self.cfg.rewards.height_gate_start
         ).float()
@@ -129,6 +133,7 @@ class NezhaStandEnv(LeggedRobot):
         contact_foot_speed_rms = (
             (self.feet_vel[:, :, :2].square().sum(2) * foot_contact).sum(1)
             / foot_contact.sum(1).clamp_min(1.0)).sqrt()
+        joint_pose_rmse = self._joint_pose_error().square().mean(1).sqrt()
         metrics = torch.stack((
             torch.atan2(-g[:, 1], -g[:, 2]),
             torch.asin(g[:, 0].clamp(-1, 1)),
@@ -141,7 +146,8 @@ class NezhaStandEnv(LeggedRobot):
             self.episode_length_buf.float() * self.dt,
             self._torque_pair_rms_nm(),
             foot_load_error_rms,
-            contact_foot_speed_rms), dim=1)
+            contact_foot_speed_rms,
+            joint_pose_rmse), dim=1)
         self.extras['stand_metrics'] = metrics.clone()
         self.extras['time_outs'] = self.time_out_buf.clone()
         return self._observations(False)[1][env_ids].clone()
@@ -165,7 +171,10 @@ class NezhaStandEnv(LeggedRobot):
                 ).mean().item(),
                 'standing_height_fraction': (
                     self.episode_standing_height_steps[completed] / completed_steps
-                ).mean().item()}
+                ).mean().item(),
+                'joint_pose_rmse_rad': (
+                    self.episode_pose_square_sum[completed] / completed_steps
+                ).sqrt().mean().item()}
             for name in self.episode_sums:
                 self.extras['episode']['reward/' + name] = (
                     self.episode_sums[name][completed] /
@@ -186,6 +195,7 @@ class NezhaStandEnv(LeggedRobot):
                                                     gymtorch.unwrap_tensor(ids32), len(env_ids))
         for buf in (self.actions, self.last_actions, self.last_last_actions, self.last_dof_vel,
                     self.episode_return, self.episode_height_sum,
+                    self.episode_pose_square_sum,
                     self.episode_standing_height_steps, self.episode_length_buf,
                     self.torques, self.raw_torques):
             buf[env_ids] = 0
@@ -227,6 +237,22 @@ class NezhaStandEnv(LeggedRobot):
     def _reward_support(self):
         """Reward only when all four wheels carry a non-trivial vertical load."""
         return self._all_feet_contact() * self._standing_height_gate()
+
+    def _joint_pose_error(self):
+        """Actual leg-joint displacement from the mirrored standing pose."""
+        return (
+            self.dof_pos[:, self.leg_indices]
+            - self.default_dof_pos[:, self.leg_indices]
+        )
+
+    def _reward_default_pose(self):
+        """LZHMine zero-command L1 posture penalty over all 12 leg joints."""
+        return self._joint_pose_error().abs().sum(1)
+
+    def _reward_hip_default(self):
+        """Extra L2 constraint on the four mirrored hip-abduction joints."""
+        hip_error = self._joint_pose_error().reshape(self.num_envs, 4, 3)[:, :, 0]
+        return hip_error.square().sum(1)
 
     def _all_feet_contact(self):
         """Raw four-wheel contact indicator used by evaluation metrics."""

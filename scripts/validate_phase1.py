@@ -58,20 +58,22 @@ class Contracts(unittest.TestCase):
         self.assertEqual(cfg.rewards.termination_cost, -10.0)
         self.assertEqual(cfg.rewards.scales.collision, -2.0)
         self.assertEqual(cfg.rewards.scales.torque_balance, -4.0)
+        self.assertEqual(cfg.rewards.scales.default_pose, -3.0)
+        self.assertEqual(cfg.rewards.scales.hip_default, -8.0)
         self.assertGreater(cfg.rewards.scales.support, 0.0)
         self.assertLess(cfg.rewards.scales.foot_force_balance, 0.0)
         self.assertLess(cfg.rewards.scales.foot_slip, 0.0)
-        for forbidden in ('pose', 'default_pos', 'default_pos_reward',
-                          'feet_air_time', 'feet_clearance', 'feet_on_air'):
+        for forbidden in ('feet_air_time', 'feet_clearance', 'feet_on_air'):
             self.assertFalse(hasattr(cfg.rewards.scales, forbidden), forbidden)
         self.assertEqual(cfg.evaluation.max_torque_pair_rms_nm, 10.0)
         self.assertEqual(cfg.evaluation.max_foot_load_fraction_rms, 0.10)
         self.assertEqual(cfg.evaluation.max_contact_foot_speed_rms_m_s, 0.05)
+        self.assertEqual(cfg.evaluation.max_joint_pose_rmse_rad, 0.15)
 
     def test_runtime_default_dof_positions(self):
         cfg = cfgmod.NezhaStandCfg()
-        expected_hips = {'FL_hip_joint': 0.1, 'FR_hip_joint': -0.1,
-                         'RL_hip_joint': 0.1, 'RR_hip_joint': -0.1}
+        expected_hips = {'FL_hip_joint': -0.1, 'FR_hip_joint': 0.1,
+                         'RL_hip_joint': -0.1, 'RR_hip_joint': 0.1}
         for name, value in expected_hips.items():
             self.assertEqual(cfg.init_state.default_joint_angles[name], value)
         for leg in ('FL', 'FR', 'RL', 'RR'):
@@ -89,7 +91,9 @@ class Contracts(unittest.TestCase):
         self.assertIn('_all_feet_contact', methods)
         self.assertIn('_reward_foot_force_balance', methods)
         self.assertIn('_reward_foot_slip', methods)
-        self.assertNotIn('_reward_pose', methods)
+        self.assertIn('_reward_default_pose', methods)
+        self.assertIn('_reward_hip_default', methods)
+        self.assertIn('_joint_pose_error', methods)
 
     def test_exactly_four_support_feet(self):
         cfg = cfgmod.NezhaStandCfg()
@@ -99,8 +103,8 @@ class Contracts(unittest.TestCase):
     def test_adopted_standing_gains(self):
         cfg = cfgmod.NezhaStandCfg()
         self.assertEqual(cfg.control.stiffness,
-                         {'hip_joint': 150.0, 'thigh_joint': 220.0,
-                          'calf_joint': 220.0, 'foot_joint': 0.0})
+                         {'hip_joint': 150.0, 'thigh_joint': 150.0,
+                          'calf_joint': 300.0, 'foot_joint': 0.0})
         self.assertEqual(cfg.control.damping,
                          {'hip_joint': 4.0, 'thigh_joint': 4.0,
                           'calf_joint': 4.0, 'foot_joint': 1.2})
