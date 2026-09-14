@@ -5,5 +5,3 @@ __pycache__/
 .venv-mujoco/
 logs/*
 !logs/.gitkeep
-results/*
-!results/.gitkeep
