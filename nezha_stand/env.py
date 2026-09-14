@@ -4,6 +4,7 @@ import torch
 from isaacgym import gymapi, gymtorch
 from isaacgym.torch_utils import quat_rotate_inverse, torch_rand_float
 from legged_gym.envs.base.legged_robot import LeggedRobot
+from .payload import inverse_matrix3, update_composite_mass_properties
 
 
 class NezhaStandEnv(LeggedRobot):
@@ -57,13 +58,19 @@ class NezhaStandEnv(LeggedRobot):
         return props
 
     @staticmethod
-    def _parallel_axis_diagonal(mass, position):
-        x, y, z = position
+    def _mat33_rows(matrix):
         return [
-            mass * (y * y + z * z),
-            mass * (x * x + z * z),
-            mass * (x * x + y * y),
+            [float(matrix.x.x), float(matrix.x.y), float(matrix.x.z)],
+            [float(matrix.y.x), float(matrix.y.y), float(matrix.y.z)],
+            [float(matrix.z.x), float(matrix.z.y), float(matrix.z.z)],
         ]
+
+    @staticmethod
+    def _write_mat33(matrix, rows):
+        matrix.x = gymapi.Vec3(*rows[0])
+        matrix.y = gymapi.Vec3(*rows[1])
+        matrix.z = gymapi.Vec3(*rows[2])
+        return matrix
 
     def _process_rigid_body_props(self, props, env_id):
         """Randomize the collapsed top payload with mass/COM/inertia coupling."""
@@ -84,38 +91,24 @@ class NezhaStandEnv(LeggedRobot):
         nominal_payload_mass = float(self.cfg.asset.payload_mass_kg)
         delta_mass = sampled_mass - nominal_payload_mass
         old_mass = float(prop.mass)
-        new_mass = old_mass + delta_mass
-        if new_mass <= 0.0:
-            raise ValueError('Payload randomization produced non-positive carrier mass')
-
         old_com = [float(prop.com.x), float(prop.com.y), float(prop.com.z)]
         payload_com = [float(value) for value in self.cfg.asset.payload_com_in_carrier]
-        new_com = [
-            (old_mass * old_com[i] + delta_mass * payload_com[i]) / new_mass
-            for i in range(3)
-        ]
-
-        old_inertia = [
-            float(prop.inertia.x), float(prop.inertia.y), float(prop.inertia.z)
-        ]
-        old_shift = self._parallel_axis_diagonal(old_mass, old_com)
-        payload_shift = self._parallel_axis_diagonal(1.0, payload_com)
-        payload_inertia = [
-            float(value) for value in self.cfg.asset.payload_inertia_per_kg
-        ]
-        new_shift = self._parallel_axis_diagonal(new_mass, new_com)
-        new_inertia = [
-            old_inertia[i] + old_shift[i]
-            + delta_mass * (payload_inertia[i] + payload_shift[i])
-            - new_shift[i]
-            for i in range(3)
-        ]
-        if min(new_inertia) <= 0.0:
-            raise ValueError('Payload randomization produced non-positive inertia')
+        new_mass, new_com, new_inertia = update_composite_mass_properties(
+            old_mass=old_mass,
+            old_com=old_com,
+            old_inertia=self._mat33_rows(prop.inertia),
+            payload_delta_mass=delta_mass,
+            payload_com=payload_com,
+            payload_inertia_per_kg=self.cfg.asset.payload_inertia_per_kg,
+        )
 
         prop.mass = new_mass
+        prop.invMass = 1.0 / new_mass
         prop.com = gymapi.Vec3(*new_com)
-        prop.inertia = gymapi.Vec3(*new_inertia)
+        prop.inertia = self._write_mat33(prop.inertia, new_inertia)
+        prop.invInertia = self._write_mat33(
+            prop.invInertia, inverse_matrix3(new_inertia)
+        )
         if not hasattr(self, 'actual_payload_mass'):
             self.actual_payload_mass = torch.zeros(
                 self.num_envs, 1, dtype=torch.float, device=self.device

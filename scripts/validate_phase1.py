@@ -26,6 +26,7 @@ sys.modules['legged_gym.envs.base'] = pkg
 base = load('legged_gym.envs.base.base_config', ROOT / 'legged_gym/envs/base/base_config.py')
 robot = load('legged_gym.envs.base.legged_robot_config', ROOT / 'legged_gym/envs/base/legged_robot_config.py')
 cfgmod = load('phase1_config', ROOT / 'nezha_stand/config.py')
+payload_math = load('payload_math', ROOT / 'nezha_stand/payload.py')
 
 
 class Contracts(unittest.TestCase):
@@ -133,9 +134,54 @@ class Contracts(unittest.TestCase):
         )
         source = (ROOT / 'nezha_stand/env.py').read_text()
         self.assertIn('def _process_rigid_body_props', source)
+        self.assertNotIn('float(prop.inertia.x)', source)
+        self.assertIn('float(matrix.x.x)', source)
+        self.assertIn('prop.invInertia', source)
         self.assertIn('self.raw_torques *= self.motor_strength_factors', source)
         self.assertIn('self.motor_strength_factors[env_ids] = torch_rand_float', source)
         self.assertIn('self.refresh_actor_rigid_shape_props(env_ids)', source)
+
+    def test_payload_mass_property_math(self):
+        old_mass = 100.0
+        old_com = [0.0, 0.0, 0.10]
+        old_inertia = [[8.0, 0.1, 0.0], [0.1, 10.0, 0.2], [0.0, 0.2, 12.0]]
+        delta_mass = 2.0
+        payload_com = [0.0, -0.03, 0.31]
+        inertia_per_kg = [0.01702, 0.027395, 0.03453]
+        new_mass, new_com, new_inertia = (
+            payload_math.update_composite_mass_properties(
+                old_mass, old_com, old_inertia, delta_mass,
+                payload_com, inertia_per_kg,
+            )
+        )
+        self.assertEqual(new_mass, 102.0)
+        self.assertAlmostEqual(new_com[1], -0.06 / 102.0)
+        self.assertAlmostEqual(new_com[2], 10.62 / 102.0)
+        self.assertTrue(
+            payload_math.is_positive_definite_symmetric(new_inertia)
+        )
+        inverse = payload_math.inverse_matrix3(new_inertia)
+        product = [
+            [sum(new_inertia[row][k] * inverse[k][column]
+                 for k in range(3)) for column in range(3)]
+            for row in range(3)
+        ]
+        for row in range(3):
+            for column in range(3):
+                self.assertAlmostEqual(
+                    product[row][column], 1.0 if row == column else 0.0,
+                    places=9,
+                )
+        reduced_mass, _, reduced_inertia = (
+            payload_math.update_composite_mass_properties(
+                old_mass, old_com, old_inertia, -2.0,
+                payload_com, inertia_per_kg,
+            )
+        )
+        self.assertEqual(reduced_mass, 98.0)
+        self.assertTrue(
+            payload_math.is_positive_definite_symmetric(reduced_inertia)
+        )
 
     def test_mujoco_contact_observability_is_bundled(self):
         simulator = ROOT / 'mujoco/nezha_stand_sim.py'
