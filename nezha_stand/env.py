@@ -1,7 +1,7 @@
 """12 policy actions and 16 physical DOFs; no MINE environment behavior."""
 import math
 import torch
-from isaacgym import gymtorch
+from isaacgym import gymapi, gymtorch
 from isaacgym.torch_utils import quat_rotate_inverse, torch_rand_float
 from legged_gym.envs.base.legged_robot import LeggedRobot
 
@@ -56,6 +56,73 @@ class NezhaStandEnv(LeggedRobot):
                 props['armature'][i] = 0.0
         return props
 
+    @staticmethod
+    def _parallel_axis_diagonal(mass, position):
+        x, y, z = position
+        return [
+            mass * (y * y + z * z),
+            mass * (x * x + z * z),
+            mass * (x * x + y * y),
+        ]
+
+    def _process_rigid_body_props(self, props, env_id):
+        """Randomize the collapsed top payload with mass/COM/inertia coupling."""
+        if not self.cfg.domain_rand.randomize_payload_mass:
+            return props
+
+        body_names = getattr(self, 'body_names', [])
+        candidates = self.cfg.asset.payload_carrier_body_names
+        carrier_name = next((name for name in candidates if name in body_names), None)
+        if carrier_name is None:
+            raise ValueError(
+                f'Cannot locate collapsed payload carrier; bodies={body_names}'
+            )
+        carrier_index = body_names.index(carrier_name)
+        prop = props[carrier_index]
+
+        sampled_mass = float(self.payload[env_id, 0].item())
+        nominal_payload_mass = float(self.cfg.asset.payload_mass_kg)
+        delta_mass = sampled_mass - nominal_payload_mass
+        old_mass = float(prop.mass)
+        new_mass = old_mass + delta_mass
+        if new_mass <= 0.0:
+            raise ValueError('Payload randomization produced non-positive carrier mass')
+
+        old_com = [float(prop.com.x), float(prop.com.y), float(prop.com.z)]
+        payload_com = [float(value) for value in self.cfg.asset.payload_com_in_carrier]
+        new_com = [
+            (old_mass * old_com[i] + delta_mass * payload_com[i]) / new_mass
+            for i in range(3)
+        ]
+
+        old_inertia = [
+            float(prop.inertia.x), float(prop.inertia.y), float(prop.inertia.z)
+        ]
+        old_shift = self._parallel_axis_diagonal(old_mass, old_com)
+        payload_shift = self._parallel_axis_diagonal(1.0, payload_com)
+        payload_inertia = [
+            float(value) for value in self.cfg.asset.payload_inertia_per_kg
+        ]
+        new_shift = self._parallel_axis_diagonal(new_mass, new_com)
+        new_inertia = [
+            old_inertia[i] + old_shift[i]
+            + delta_mass * (payload_inertia[i] + payload_shift[i])
+            - new_shift[i]
+            for i in range(3)
+        ]
+        if min(new_inertia) <= 0.0:
+            raise ValueError('Payload randomization produced non-positive inertia')
+
+        prop.mass = new_mass
+        prop.com = gymapi.Vec3(*new_com)
+        prop.inertia = gymapi.Vec3(*new_inertia)
+        if not hasattr(self, 'actual_payload_mass'):
+            self.actual_payload_mass = torch.zeros(
+                self.num_envs, 1, dtype=torch.float, device=self.device
+            )
+        self.actual_payload_mass[env_id, 0] = sampled_mass
+        return props
+
     def _compute_torques(self, actions):
         ids = self.leg_indices
         target = self.default_dof_pos[:, ids] + self.cfg.control.action_scale * actions
@@ -64,6 +131,8 @@ class NezhaStandEnv(LeggedRobot):
         # Zero wheel velocity reference means damping, NOT mechanical locking.
         self.raw_torques = -self.d_gains * self.dof_vel
         self.raw_torques[:, ids] += self.p_gains[ids] * (target - self.dof_pos[:, ids])
+        if self.cfg.domain_rand.randomize_motor_strength:
+            self.raw_torques *= self.motor_strength_factors
         self.saturation += (self.raw_torques.abs() >= 0.99 * self.torque_limits).float().mean(1)
         return torch.maximum(torch.minimum(self.raw_torques, self.torque_limits), -self.torque_limits)
 
@@ -170,6 +239,29 @@ class NezhaStandEnv(LeggedRobot):
                 self.extras['episode']['reward/' + name] = (
                     self.episode_sums[name][completed] /
                     (self.episode_length_buf[completed] * self.dt)).mean().item()
+            if self.cfg.domain_rand.randomize_friction:
+                self.extras['episode']['domain/friction_mean'] = (
+                    self.friction_coeffs[completed].mean().item()
+                )
+            if self.cfg.domain_rand.randomize_motor_strength:
+                self.extras['episode']['domain/motor_strength_mean'] = (
+                    self.motor_strength_factors[completed].mean().item()
+                )
+            if self.cfg.domain_rand.randomize_payload_mass:
+                self.extras['episode']['domain/payload_mass_kg_mean'] = (
+                    self.payload[completed].mean().item()
+                )
+        # Dynamics remain constant within an episode so the DreamWaQ history
+        # encoder can infer them, then motor/friction are resampled on reset.
+        if self.cfg.domain_rand.randomize_motor_strength:
+            self.motor_strength_factors[env_ids] = torch_rand_float(
+                self.cfg.domain_rand.motor_strength_range[0],
+                self.cfg.domain_rand.motor_strength_range[1],
+                (len(env_ids), 1), device=self.device,
+            )
+        if (self.cfg.domain_rand.randomize_friction
+                or self.cfg.domain_rand.randomize_restitution):
+            self.refresh_actor_rigid_shape_props(env_ids)
         self.dof_pos[env_ids] = self.default_dof_pos
         jitter = self.cfg.init_state.joint_jitter
         q = self.default_dof_pos[:, self.leg_indices] + torch_rand_float(
@@ -212,7 +304,7 @@ class NezhaStandEnv(LeggedRobot):
         return normalized_error.square()
 
     def _standing_height_gate(self):
-        """Smoothly unlock positive standing rewards from 0.45 to 0.50 m."""
+        """Smoothly unlock positive standing rewards from 0.40 to 0.50 m."""
         start = self.cfg.rewards.height_gate_start
         target = self.cfg.rewards.base_height_target
         return ((self.base_height - start) / (target - start)).clamp(0.0, 1.0)
@@ -227,6 +319,14 @@ class NezhaStandEnv(LeggedRobot):
     def _reward_support(self):
         """Reward only when all four wheels carry a non-trivial vertical load."""
         return self._all_feet_contact() * self._standing_height_gate()
+
+    def _reward_nominal_pose(self):
+        """Keep a normal stance while allowing load-dependent pose adaptation."""
+        error = (
+            self.dof_pos[:, self.leg_indices]
+            - self.default_dof_pos[:, self.leg_indices]
+        )
+        return error.square().sum(1)
 
     def _all_feet_contact(self):
         """Raw four-wheel contact indicator used by evaluation metrics."""

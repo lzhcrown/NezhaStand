@@ -13,7 +13,8 @@ from rsl_rl.modules import DreamWaQActorCritic
 
 
 class DreamWaQStandRunner:
-    def __init__(self, env, train_cfg, log_dir=None, device="cpu"):
+    def __init__(self, env, train_cfg, log_dir=None, device="cpu",
+                 external_logger=None):
         self.cfg = train_cfg["runner"]
         self.alg_cfg = train_cfg["algorithm"]
         self.policy_cfg = train_cfg["policy"]
@@ -36,6 +37,9 @@ class DreamWaQStandRunner:
         )
         self.log_dir = log_dir
         self.writer = None
+        # Optional run-like logger (currently W&B). Keeping it injected avoids
+        # making wandb a mandatory dependency for TensorBoard-only training.
+        self.external_logger = external_logger
         self.tot_timesteps = 0
         self.tot_time = 0.0
         self.current_learning_iteration = 0
@@ -130,6 +134,8 @@ class DreamWaQStandRunner:
             self.save(os.path.join(
                 self.log_dir, f"model_{self.current_learning_iteration}.pt"
             ))
+        if self.writer is not None:
+            self.writer.flush()
 
     def _log(self, iteration, final_iteration, losses, episode_infos,
              reward_buffer, length_buffer, collection_time, learning_time):
@@ -138,38 +144,40 @@ class DreamWaQStandRunner:
         self.tot_timesteps += steps
         self.tot_time += iteration_time
         fps = int(steps / max(iteration_time, 1e-6))
-        if self.writer is not None:
-            names = {
-                "value": "Loss/value_function",
-                "surrogate": "Loss/surrogate",
-                "vae": "Loss/vae_total",
-                "reconstruction": "Loss/vae_reconstruction",
-                "velocity": "Loss/vae_velocity",
-                "kl": "Loss/vae_kl",
-                "entropy": "Loss/entropy",
-            }
-            for key, tag in names.items():
-                self.writer.add_scalar(tag, losses[key], iteration)
-            self.writer.add_scalar("Loss/learning_rate", self.alg.learning_rate, iteration)
-            self.writer.add_scalar(
-                "Policy/mean_noise_std", self.actor_critic.std.mean().item(), iteration
+        names = {
+            "value": "Loss/value_function",
+            "surrogate": "Loss/surrogate",
+            "vae": "Loss/vae_total",
+            "reconstruction": "Loss/vae_reconstruction",
+            "velocity": "Loss/vae_velocity",
+            "kl": "Loss/vae_kl",
+            "entropy": "Loss/entropy",
+        }
+        metrics = {tag: float(losses[key]) for key, tag in names.items()}
+        metrics["Loss/learning_rate"] = float(self.alg.learning_rate)
+        metrics["Policy/mean_noise_std"] = float(
+            self.actor_critic.std.mean().item()
+        )
+        metrics["Perf/total_fps"] = float(fps)
+        metrics["Perf/collection_time"] = float(collection_time)
+        metrics["Perf/learning_time"] = float(learning_time)
+        metrics["Perf/total_timesteps"] = float(self.tot_timesteps)
+        if reward_buffer:
+            metrics["Train/mean_reward"] = float(statistics.mean(reward_buffer))
+            metrics["Train/mean_episode_length"] = float(
+                statistics.mean(length_buffer)
             )
-            self.writer.add_scalar("Perf/total_fps", fps, iteration)
-            if reward_buffer:
-                self.writer.add_scalar(
-                    "Train/mean_reward", statistics.mean(reward_buffer), iteration
-                )
-                self.writer.add_scalar(
-                    "Train/mean_episode_length", statistics.mean(length_buffer), iteration
-                )
-            for key in episode_infos[0] if episode_infos else ():
-                values = [
-                    torch.as_tensor(info[key], device=self.device).float().reshape(-1)
-                    for info in episode_infos
-                ]
-                self.writer.add_scalar(
-                    "Episode/" + key, torch.cat(values).mean(), iteration
-                )
+        for key in episode_infos[0] if episode_infos else ():
+            values = [
+                torch.as_tensor(info[key], device=self.device).float().reshape(-1)
+                for info in episode_infos
+            ]
+            metrics["Episode/" + key] = float(torch.cat(values).mean().item())
+        if self.writer is not None:
+            for tag, value in metrics.items():
+                self.writer.add_scalar(tag, value, iteration)
+        if self.external_logger is not None:
+            self.external_logger.log(metrics, step=iteration)
         summary = (
             f"iteration {iteration}/{final_iteration} | {fps} steps/s | "
             f"value {losses['value']:.4f} | policy {losses['surrogate']:.4f} | "
@@ -184,6 +192,7 @@ class DreamWaQStandRunner:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         torch.save({
             "architecture": "DreamWaQ",
+            "payload_mass_kg": float(self.env.cfg.asset.payload_mass_kg),
             "model_state_dict": self.actor_critic.state_dict(),
             "optimizer_state_dict": self.alg.optimizer.state_dict(),
             "vae_optimizer_state_dict": self.alg.vae_optimizer.state_dict(),
@@ -191,12 +200,28 @@ class DreamWaQStandRunner:
             "infos": infos,
         }, path)
 
+    def close(self):
+        """Flush local TensorBoard events before external logging finishes."""
+        if self.writer is not None:
+            self.writer.flush()
+            self.writer.close()
+            self.writer = None
+
     def load(self, path, load_optimizer=True):
         checkpoint = torch.load(path, map_location=self.device)
         if checkpoint.get("architecture") != "DreamWaQ":
             raise RuntimeError(
                 "This is not a DreamWaQ checkpoint; old plain-PPO checkpoints "
                 "cannot be resumed with the history encoder."
+            )
+        checkpoint_payload = checkpoint.get("payload_mass_kg")
+        configured_payload = float(self.env.cfg.asset.payload_mass_kg)
+        if (load_optimizer and checkpoint_payload is not None
+                and abs(float(checkpoint_payload) - configured_payload) > 1.0e-9):
+            raise RuntimeError(
+                "Cannot resume training with a different payload mass: "
+                f"checkpoint={float(checkpoint_payload):g} kg, "
+                f"configured={configured_payload:g} kg. Start a new run instead."
             )
         self.actor_critic.load_state_dict(checkpoint["model_state_dict"])
         if load_optimizer:

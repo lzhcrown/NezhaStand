@@ -123,6 +123,7 @@ def export(args):
         "action_scale": 0.15,
         "clip_actions": 3.0,
         "control_frequency_hz": 50,
+        "training_payload_mass_kg": checkpoint.get("payload_mass_kg", 0.0),
         "p_gains_per_leg": [150.0, 220.0, 220.0, 0.0],
         "d_gains_per_leg": [4.0, 4.0, 4.0, 1.2],
         "policy_file": output_path.name,

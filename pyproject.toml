@@ -17,5 +17,9 @@ dependencies = [
     "tensorboard>=2.8,<2.14",
 ]
 
+[project.optional-dependencies]
+# W&B 0.25 dropped Python 3.8, which this Isaac Gym environment requires.
+wandb = ["wandb>=0.23,<0.25"]
+
 [tool.setuptools.packages.find]
 include = ["nezha_stand*", "legged_gym*", "rsl_rl*", "deploy*"]

@@ -72,7 +72,7 @@ def main():
     except Exception as exc:
         errors.append(f'training-stack import failed: {exc}')
 
-    asset = PROJECT_ROOT / 'assets/nezha/urdf/nezha.urdf'
+    asset = PROJECT_ROOT / 'assets/nezha_description/urdf/nezha_description.urdf'
     print(f'URDF:      {asset}')
     if not asset.is_file():
         errors.append(f'URDF is missing: {asset}')

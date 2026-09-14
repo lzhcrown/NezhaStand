@@ -57,13 +57,24 @@ def validate(args):
     ):
         raise RuntimeError("MuJoCo model has no free joint")
 
-    expected_p_gains = [150.0, 220.0, 220.0, 0.0] * 4
+    expected_p_gains = [150.0, 220.0, 300.0, 0.0] * 4
     if cfg["p_gains"] != expected_p_gains:
         raise RuntimeError(
-            "Standing Kp contract mismatch; expected [150, 220, 220, 0] per leg"
+            "90 kg standing Kp mismatch; expected [150, 220, 300, 0] per leg"
         )
     if float(cfg["contact_force_threshold_n"]) <= 0.0:
         raise RuntimeError("contact_force_threshold_n must be positive")
+    payload_body_name = cfg.get("payload_body_name", "top_box")
+    payload_body_id = mujoco.mj_name2id(
+        model, mujoco.mjtObj.mjOBJ_BODY, payload_body_name
+    )
+    if payload_body_id < 0:
+        raise RuntimeError(f"Missing payload body: {payload_body_name}")
+    payload_mass_kg = float(model.body_mass[payload_body_id])
+    if payload_mass_kg < 0.0:
+        raise RuntimeError("MJCF payload mass must be non-negative")
+    if len(cfg.get("payload_inertia_per_kg", [])) != 3:
+        raise RuntimeError("payload_inertia_per_kg must contain three values")
     for body_name in cfg["wheel_body_names"]:
         body_id = mujoco.mj_name2id(
             model, mujoco.mjtObj.mjOBJ_BODY, body_name
@@ -119,10 +130,13 @@ def validate(args):
     print(f"model:  OK ({model_path})")
     print(f"state:  nq={model.nq}, nv={model.nv}, joints=16 + floating base")
     print("contract: current_obs=46, history=5x46=230, action=12, control=50 Hz")
-    print("control: Kp per leg=[150, 220, 220, 0]")
+    print("control: Kp per leg=[150, 220, 300, 0]")
     print(
         "contact: wheels=FL/FR/RL/RR, threshold="
         f"{float(cfg['contact_force_threshold_n']):g} N"
+    )
+    print(
+        f"payload: body={payload_body_name}, URDF/MJCF={payload_mass_kg:g} kg"
     )
     return 0
 

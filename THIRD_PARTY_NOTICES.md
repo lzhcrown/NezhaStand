@@ -14,3 +14,7 @@ making the observation dimensions task-specific and clearing history on reset.
 NVIDIA Isaac Gym is not redistributed by this project. Install Isaac Gym
 Preview 4 separately under NVIDIA's license before running simulation or
 training.
+
+The Nezha URDF and STL assets synchronized from the local
+`nezha_description` ROS package are redistributed under the BSD license
+declared by that package's `package.xml`.

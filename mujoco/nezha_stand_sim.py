@@ -35,6 +35,39 @@ def _require_file(path, label):
         raise FileNotFoundError(f"{label} does not exist: {path}")
 
 
+def _apply_payload_mass(mujoco, model, data, cfg, override_mass):
+    """Use MJCF dynamics by default; optionally override for a sensitivity test."""
+    body_name = cfg.get("payload_body_name", "top_box")
+    body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+    if body_id < 0:
+        raise ValueError(f"MuJoCo model is missing payload body: {body_name}")
+    if override_mass is None:
+        urdf_mass = float(model.body_mass[body_id])
+        print(f"Payload: {urdf_mass:g} kg on {body_name} (from URDF-derived MJCF)")
+        return urdf_mass
+
+    requested_mass = float(override_mass)
+    if requested_mass < 0.0:
+        raise ValueError("--payload_mass must be non-negative")
+    effective_mass = max(requested_mass, 1.0e-9)
+    inertia_per_kg = np.asarray(cfg["payload_inertia_per_kg"], dtype=np.float64)
+    payload_com = np.asarray(cfg["payload_com"], dtype=np.float64)
+    if inertia_per_kg.shape != (3,) or np.any(inertia_per_kg <= 0.0):
+        raise ValueError("payload_inertia_per_kg must contain three positive values")
+    if payload_com.shape != (3,):
+        raise ValueError("payload_com must contain three values")
+    model.body_mass[body_id] = effective_mass
+    model.body_inertia[body_id] = inertia_per_kg * effective_mass
+    model.body_ipos[body_id] = payload_com
+    model.body_iquat[body_id] = np.asarray([1.0, 0.0, 0.0, 0.0])
+    mujoco.mj_setConst(model, data)
+    print(
+        f"Payload: {requested_mass:g} kg on {body_name} "
+        f"(temporary MuJoCo override; simulator mass {effective_mass:g} kg)"
+    )
+    return requested_mass
+
+
 def _joint_addresses(mujoco, model, names):
     qpos_addresses = []
     dof_addresses = []
@@ -207,7 +240,7 @@ def _normalized_torque_balance(torques, torque_limits, leg_indices):
 
 
 CSV_FIELDS = [
-    "time_s", "base_x_m", "base_y_m", "base_z_m", "roll_deg", "pitch_deg",
+    "time_s", "payload_mass_kg", "base_x_m", "base_y_m", "base_z_m", "roll_deg", "pitch_deg",
     "drift_m", "wheel_rms_rad_s", "torque_pair_rms_nm",
     "normalized_torque_balance", "all_four_contact", "contact_count",
     "FL_contact", "FR_contact", "RL_contact", "RR_contact",
@@ -218,12 +251,13 @@ CSV_FIELDS = [
 ]
 
 
-def _csv_row(simulated_time, base_position, roll, pitch, drift, wheel_rms,
+def _csv_row(simulated_time, payload_mass_kg, base_position, roll, pitch, drift, wheel_rms,
              torque_rms, normalized_torque_balance, contacts, all_contact,
              forces, fractions, load_error):
     names = ("FL", "FR", "RL", "RR")
     row = {
         "time_s": simulated_time,
+        "payload_mass_kg": payload_mass_kg,
         "base_x_m": base_position[0],
         "base_y_m": base_position[1],
         "base_z_m": base_position[2],
@@ -273,6 +307,9 @@ def run(args):
 
     model = mujoco.MjModel.from_xml_path(model_path)
     data = mujoco.MjData(model)
+    payload_mass_kg = _apply_payload_mass(
+        mujoco, model, data, cfg, args.payload_mass
+    )
     free_joint_id = _free_joint(mujoco, model)
     root_qpos_address = int(model.jnt_qposadr[free_joint_id])
     root_body_id = int(model.jnt_bodyid[free_joint_id])
@@ -434,7 +471,7 @@ def run(args):
 
             if csv_writer is not None:
                 csv_writer.writerow(_csv_row(
-                    simulated_time, base_position, roll, pitch, drift, wheel_rms,
+                    simulated_time, payload_mass_kg, base_position, roll, pitch, drift, wheel_rms,
                     torque_rms, normalized_torque_balance, contacts, all_contact,
                     vertical_forces, load_fractions, load_error,
                 ))
@@ -486,6 +523,10 @@ def parse_args():
     )
     parser.add_argument("--model", help="Override MuJoCo XML model path")
     parser.add_argument("--policy", help="Override exported policy.pt path")
+    parser.add_argument(
+        "--payload_mass", type=float,
+        help="Optional MuJoCo-only override; default uses MJCF/URDF mass",
+    )
     parser.add_argument("--device", default="cpu", help="Torch inference device")
     parser.add_argument("--headless", action="store_true")
     parser.add_argument(

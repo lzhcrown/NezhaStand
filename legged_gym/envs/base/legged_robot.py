@@ -385,7 +385,7 @@ class LeggedRobot(BaseTask):
                 self.friction_coeffs = torch_rand_float(friction_range[0], friction_range[1], (self.num_envs,1), device=self.device)
 
             for s in range(len(props)):
-                props[s].friction = self.friction_coeffs[env_id]
+                props[s].friction = float(self.friction_coeffs[env_id, 0].item())
 
         if self.cfg.domain_rand.randomize_restitution:
             if env_id==0:
@@ -394,7 +394,7 @@ class LeggedRobot(BaseTask):
                 self.restitution_coeffs = torch_rand_float(restitution_range[0], restitution_range[1], (self.num_envs,1), device=self.device)
 
             for s in range(len(props)):
-                props[s].restitution = self.restitution_coeffs[env_id]
+                props[s].restitution = float(self.restitution_coeffs[env_id, 0].item())
 
         return props
     
@@ -404,12 +404,16 @@ class LeggedRobot(BaseTask):
         if self.cfg.domain_rand.randomize_restitution:
             self.restitution_coeffs[env_ids] = torch_rand_float(self.cfg.domain_rand.restitution_range[0], self.cfg.domain_rand.restitution_range[1], (len(env_ids), 1), device=self.device)
         
-        for env_id in env_ids:
+        for env_id in env_ids.tolist():
             rigid_shape_props = self.gym.get_actor_rigid_shape_properties(self.envs[env_id], 0)
 
             for i in range(len(rigid_shape_props)):
-                rigid_shape_props[i].friction = self.friction_coeffs[env_id, 0]
-                rigid_shape_props[i].restitution = self.restitution_coeffs[env_id, 0]
+                rigid_shape_props[i].friction = float(
+                    self.friction_coeffs[env_id, 0].item()
+                )
+                rigid_shape_props[i].restitution = float(
+                    self.restitution_coeffs[env_id, 0].item()
+                )
 
             self.gym.set_actor_rigid_shape_properties(self.envs[env_id], 0, rigid_shape_props)
 
@@ -742,8 +746,18 @@ class LeggedRobot(BaseTask):
         self.Kp_factors = torch.ones(self.num_envs, 1, dtype=torch.float, device=self.device, requires_grad=False)
         self.Kd_factors = torch.ones(self.num_envs, 1, dtype=torch.float, device=self.device, requires_grad=False)
         self.motor_strength_factors = torch.ones(self.num_envs, 1, dtype=torch.float, device=self.device, requires_grad=False)
-        self.payload = torch.zeros(self.num_envs, 1, dtype=torch.float, device=self.device, requires_grad=False)
-        self.com_displacement = torch.zeros(self.num_envs, 3, dtype=torch.float, device=self.device, requires_grad=False)
+        # _create_envs samples payload/COM before actors are created. Preserve
+        # those exact tensors so diagnostics match the properties in PhysX.
+        if not hasattr(self, "payload"):
+            self.payload = torch.zeros(
+                self.num_envs, 1, dtype=torch.float, device=self.device,
+                requires_grad=False,
+            )
+        if not hasattr(self, "com_displacement"):
+            self.com_displacement = torch.zeros(
+                self.num_envs, 3, dtype=torch.float, device=self.device,
+                requires_grad=False,
+            )
         self.disturbance = torch.zeros(self.num_envs, self.num_bodies, 3, dtype=torch.float, device=self.device, requires_grad=False)
         
         if self.cfg.domain_rand.randomize_kp:
@@ -752,14 +766,23 @@ class LeggedRobot(BaseTask):
             self.Kd_factors = torch_rand_float(self.cfg.domain_rand.kd_range[0], self.cfg.domain_rand.kd_range[1], (self.num_envs, 1), device=self.device)
         if self.cfg.domain_rand.randomize_motor_strength:
             self.motor_strength_factors = torch_rand_float(self.cfg.domain_rand.motor_strength_range[0], self.cfg.domain_rand.motor_strength_range[1], (self.num_envs, 1), device=self.device)
-        if self.cfg.domain_rand.randomize_payload_mass:
+        if self.cfg.domain_rand.randomize_payload_mass and not torch.any(self.payload):
             self.payload = torch_rand_float(self.cfg.domain_rand.payload_mass_range[0], self.cfg.domain_rand.payload_mass_range[1], (self.num_envs, 1), device=self.device)
-        if self.cfg.domain_rand.randomize_com_displacement:
+        if self.cfg.domain_rand.randomize_com_displacement and not torch.any(self.com_displacement):
             self.com_displacement = torch_rand_float(self.cfg.domain_rand.com_displacement_range[0], self.cfg.domain_rand.com_displacement_range[1], (self.num_envs, 3), device=self.device)
             
-        #store friction and restitution
-        self.friction_coeffs = torch.ones(self.num_envs, 1, dtype=torch.float, device=self.device, requires_grad=False)
-        self.restitution_coeffs = torch.zeros(self.num_envs, 1, dtype=torch.float, device=self.device, requires_grad=False)
+        # Shape properties are sampled during actor creation. Preserve those
+        # exact tensors so diagnostics remain consistent with PhysX.
+        if not hasattr(self, "friction_coeffs"):
+            self.friction_coeffs = torch.ones(
+                self.num_envs, 1, dtype=torch.float, device=self.device,
+                requires_grad=False,
+            )
+        if not hasattr(self, "restitution_coeffs"):
+            self.restitution_coeffs = torch.zeros(
+                self.num_envs, 1, dtype=torch.float, device=self.device,
+                requires_grad=False,
+            )
 
 
     def _prepare_reward_function(self):
@@ -851,8 +874,8 @@ class LeggedRobot(BaseTask):
             raise FileNotFoundError(
                 f"Configured robot asset does not exist: {asset_path}"
             )
-        asset_root = os.path.dirname(asset_path)
-        asset_file = os.path.basename(asset_path)
+        asset_root = getattr(self.cfg.asset, "asset_root", os.path.dirname(asset_path))
+        asset_file = getattr(self.cfg.asset, "asset_file", os.path.basename(asset_path))
 
         asset_options = gymapi.AssetOptions()
         asset_options.default_dof_drive_mode = self.cfg.asset.default_dof_drive_mode
@@ -877,6 +900,7 @@ class LeggedRobot(BaseTask):
 
         # save body names from the asset
         body_names = self.gym.get_asset_rigid_body_names(robot_asset)
+        self.body_names = list(body_names)
         self.dof_names = self.gym.get_asset_dof_names(robot_asset)
         self.num_bodies = len(body_names)
         self.num_dofs = len(self.dof_names)
@@ -953,7 +977,11 @@ class LeggedRobot(BaseTask):
                     self.default_rigid_body_mass[j] = body_props[j].mass
                     
             body_props = self._process_rigid_body_props(body_props, i)
-            self.gym.set_actor_rigid_body_properties(env_handle, actor_handle, body_props, recomputeInertia=True)
+            recompute_inertia = getattr(self.cfg.asset, "recompute_inertia", True)
+            self.gym.set_actor_rigid_body_properties(
+                env_handle, actor_handle, body_props,
+                recomputeInertia=recompute_inertia,
+            )
             self.envs.append(env_handle)
             self.actor_handles.append(actor_handle)
 
