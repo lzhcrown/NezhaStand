@@ -108,7 +108,7 @@ class Contracts(unittest.TestCase):
     def test_adopted_standing_gains(self):
         cfg, ppo = cfgmod.NezhaStandCfg(), cfgmod.NezhaStandCfgPPO()
         self.assertEqual(cfg.control.stiffness,
-                         {'hip_joint': 150.0, 'thigh_joint': 220.0,
+                         {'hip_joint': 220.0, 'thigh_joint': 220.0,
                           'calf_joint': 300.0, 'foot_joint': 0.0})
         self.assertEqual(cfg.control.damping,
                          {'hip_joint': 4.0, 'thigh_joint': 4.0,

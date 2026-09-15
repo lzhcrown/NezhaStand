@@ -62,7 +62,7 @@ class NezhaStandCfg(LeggedRobotCfg):
     class control(LeggedRobotCfg.control):
         # Keep the adopted hip/thigh gains and use LZHMine's proven calf gain
         # to provide enough stance stiffness for the 90 kg raised payload.
-        stiffness = {'hip_joint': 150.0, 'thigh_joint': 220.0,
+        stiffness = {'hip_joint': 220.0, 'thigh_joint': 220.0,
                      'calf_joint': 300.0, 'foot_joint': 0.0}
         damping = {'hip_joint': 4.0, 'thigh_joint': 4.0,
                    'calf_joint': 4.0, 'foot_joint': 1.2}

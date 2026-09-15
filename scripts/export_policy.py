@@ -120,11 +120,11 @@ def export(args):
         "history_observations": 230,
         "latent_dim": 16,
         "actions": 12,
-        "action_scale": 0.15,
+        "action_scale": 0.25,
         "clip_actions": 3.0,
         "control_frequency_hz": 50,
         "training_payload_mass_kg": checkpoint.get("payload_mass_kg", 0.0),
-        "p_gains_per_leg": [150.0, 220.0, 220.0, 0.0],
+        "p_gains_per_leg": [220.0, 220.0, 300.0, 0.0],
         "d_gains_per_leg": [4.0, 4.0, 4.0, 1.2],
         "policy_file": output_path.name,
     }

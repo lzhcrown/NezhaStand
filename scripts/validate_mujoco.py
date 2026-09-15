@@ -57,10 +57,10 @@ def validate(args):
     ):
         raise RuntimeError("MuJoCo model has no free joint")
 
-    expected_p_gains = [150.0, 220.0, 300.0, 0.0] * 4
+    expected_p_gains = [220.0, 220.0, 300.0, 0.0] * 4
     if cfg["p_gains"] != expected_p_gains:
         raise RuntimeError(
-            "90 kg standing Kp mismatch; expected [150, 220, 300, 0] per leg"
+            "90 kg standing Kp mismatch; expected [220, 220, 300, 0] per leg"
         )
     if float(cfg["contact_force_threshold_n"]) <= 0.0:
         raise RuntimeError("contact_force_threshold_n must be positive")
@@ -130,7 +130,7 @@ def validate(args):
     print(f"model:  OK ({model_path})")
     print(f"state:  nq={model.nq}, nv={model.nv}, joints=16 + floating base")
     print("contract: current_obs=46, history=5x46=230, action=12, control=50 Hz")
-    print("control: Kp per leg=[150, 220, 300, 0]")
+    print("control: Kp per leg=[220, 220, 300, 0]")
     print(
         "contact: wheels=FL/FR/RL/RR, threshold="
         f"{float(cfg['contact_force_threshold_n']):g} N"
